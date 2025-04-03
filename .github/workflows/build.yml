@@ -1,7 +1,10 @@
 name: Build Docker Image
 
 on:
-  push:
+  release:
+    types:
+      - published
+      - prereleased
 
 env:
   GITHUB_CR_REPO: ghcr.io/${{ github.repository }}
