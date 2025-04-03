@@ -104,17 +104,17 @@ jobs:
 
       - name: Docker tags
         run: |
-          if [ -z "$DOCKER_METADATA_OUTPUT_VERSION" ]; then
-            echo DOCKER_METADATA_OUTPUT_VERSION=${{ github.ref_name }} >> $GITHUB_ENV
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          if [ -z "$tags" ]; then
+            echo "DOCKER_METADATA_OUTPUT_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+            tags="-t ${{ github.ref_name }}"
           fi
-          if [ -z "$DOCKER_METADATA_OUTPUT_JSON" ]; then
-            echo DOCKER_METADATA_OUTPUT_JSON='{"tags":["${{ github.ref_name }}"]}' >> $GITHUB_ENV
-          fi
+          echo "DOCKER_METADATA_TAGS=$tags" >> $GITHUB_ENV
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create ${{ env.DOCKER_METADATA_TAGS }} \
             $(printf '${{ env.GITHUB_CR_REPO }}@sha256:%s ' *)
 
       - name: Inspect image
