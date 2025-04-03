@@ -107,7 +107,7 @@ jobs:
           tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           if [ -z "$tags" ]; then
             echo "DOCKER_METADATA_OUTPUT_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
-            tags="-t ${{ github.ref_name }}"
+            tags="-t ${{ env.GITHUB_CR_REPO }}:${{ github.ref_name }}"
           fi
           echo "DOCKER_METADATA_TAGS=$tags" >> $GITHUB_ENV
 
