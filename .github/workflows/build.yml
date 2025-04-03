@@ -102,6 +102,15 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}
 
+      - name: Docker tags
+        run: |
+          if [ -z "$DOCKER_METADATA_OUTPUT_VERSION" ]; then
+            echo DOCKER_METADATA_OUTPUT_VERSION=${{ github.ref_name }} >> $GITHUB_ENV
+          fi
+          if [ -z "$DOCKER_METADATA_OUTPUT_JSON" ]; then
+            echo DOCKER_METADATA_OUTPUT_JSON='{"tags":["${{ github.ref_name }}"]}' >> $GITHUB_ENV
+          fi
+
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
@@ -110,4 +119,4 @@ jobs:
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.GITHUB_CR_REPO }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.GITHUB_CR_REPO }}:${{ env.DOCKER_METADATA_OUTPUT_VERSION }}
