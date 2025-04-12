@@ -14,7 +14,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
 
-from .llm import DeepSeekR1ChatOpenAI, DeepSeekR1ChatOllama,SiliconFlowChat
+from .llm import DeepSeekR1ChatOpenAI, DeepSeekR1ChatOllama
 
 PROVIDER_DISPLAY_NAMES = {
     "openai": "OpenAI",
@@ -177,13 +177,11 @@ def get_llm_model(provider: str, **kwargs):
             base_url = os.getenv("SiliconFLOW_ENDPOINT", "")
         else:
             base_url = kwargs.get("base_url")
-        return SiliconFlowChat(
+        return ChatOpenAI(
             api_key=api_key,
             base_url=base_url,
             model_name=kwargs.get("model_name", "Qwen/QwQ-32B"),
             temperature=kwargs.get("temperature", 0.0),
-            max_tokens=kwargs.get("max_tokens", 512),
-            frequency_penalty=kwargs.get("frequency_penalty", 0.5),
         )
     else:
         raise ValueError(f"Unsupported provider: {provider}")
