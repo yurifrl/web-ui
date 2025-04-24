@@ -253,7 +253,7 @@ model_names = {
         "Pro/THUDM/chatglm3-6b",
         "Pro/THUDM/glm-4-9b-chat",
     ],
-    "ibm": ["meta-llama/llama-4-maverick-17b-128e-instruct-fp8","meta-llama/llama-3-2-90b-vision-instruct"]
+    "ibm": ["ibm/granite-vision-3.1-2b-preview", "meta-llama/llama-4-maverick-17b-128e-instruct-fp8","meta-llama/llama-3-2-90b-vision-instruct"]
 }
 
 
