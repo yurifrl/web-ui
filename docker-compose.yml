@@ -28,6 +28,9 @@ services:
       - ALIBABA_API_KEY=${ALIBABA_API_KEY:-}
       - MOONSHOT_ENDPOINT=${MOONSHOT_ENDPOINT:-https://api.moonshot.cn/v1}
       - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      - IBM_API_KEY=${IBM_API_KEY:-}
+      - IBM_ENDPOINT=${IBM_ENDPOINT:-https://us-south.ml.cloud.ibm.com}
+      - IBM_PROJECT_ID=${IBM_PROJECT_ID:-}
       - BROWSER_USE_LOGGING_LEVEL=${BROWSER_USE_LOGGING_LEVEL:-info}
       - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-false}
       - CHROME_PATH=/usr/bin/google-chrome
