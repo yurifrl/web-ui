@@ -13,6 +13,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_ibm import ChatWatsonx
 
 from .llm import DeepSeekR1ChatOpenAI, DeepSeekR1ChatOllama
 
@@ -24,7 +25,8 @@ PROVIDER_DISPLAY_NAMES = {
     "google": "Google",
     "alibaba": "Alibaba",
     "moonshot": "MoonShot",
-    "unbound": "Unbound AI"
+    "unbound": "Unbound AI",
+    "ibm": "IBM"
 }
 
 
@@ -154,6 +156,23 @@ def get_llm_model(provider: str, **kwargs):
             base_url=base_url,
             api_key=api_key,
         )
+    elif provider == "ibm":
+        parameters = {
+            "temperature": kwargs.get("temperature", 0.0),
+            "max_tokens": kwargs.get("num_ctx", 32000)
+        }
+        if not kwargs.get("base_url", ""):
+            base_url = os.getenv("IBM_ENDPOINT", "https://us-south.ml.cloud.ibm.com")
+        else:
+            base_url = kwargs.get("base_url")
+
+        return ChatWatsonx(
+            model_id=kwargs.get("model_name", "ibm/granite-vision-3.1-2b-preview"),
+            url=base_url,
+            project_id=os.getenv("IBM_PROJECT_ID"),
+            apikey=os.getenv("IBM_API_KEY"),
+            params=parameters
+        )    
     elif provider == "moonshot":
         return ChatOpenAI(
             model=kwargs.get("model_name", "moonshot-v1-32k-vision-preview"),
@@ -234,6 +253,7 @@ model_names = {
         "Pro/THUDM/chatglm3-6b",
         "Pro/THUDM/glm-4-9b-chat",
     ],
+    "ibm": ["ibm/granite-vision-3.1-2b-preview", "meta-llama/llama-4-maverick-17b-128e-instruct-fp8","meta-llama/llama-3-2-90b-vision-instruct"]
 }
 
 
