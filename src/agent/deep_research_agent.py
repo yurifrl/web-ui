@@ -10,7 +10,6 @@ import logging
 from pprint import pprint
 from uuid import uuid4
 from src.utils import utils
-from src.agent.custom_agent import CustomAgent
 import json
 import re
 from browser_use.agent.service import Agent
@@ -27,7 +26,6 @@ from langchain_core.messages import (
     SystemMessage
 )
 from json_repair import repair_json
-from src.agent.custom_prompts import CustomSystemPrompt, CustomAgentMessagePrompt
 from src.controller.custom_controller import CustomController
 from src.browser.custom_browser import CustomBrowser
 from src.browser.custom_context import BrowserContextConfig, BrowserContext
@@ -35,6 +33,7 @@ from browser_use.browser.context import (
     BrowserContextConfig,
     BrowserContextWindowSize,
 )
+from browser_use.agent.service import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +223,7 @@ Provide your output as a JSON formatted list. Each item in the list must adhere 
             add_infos = "1. Please click on the most relevant link to get information and go deeper, instead of just staying on the search page. \n" \
                         "2. When opening a PDF file, please remember to extract the content using extract_content instead of simply opening it for the user to view.\n"
             if use_own_browser:
-                agent = CustomAgent(
+                agent = Agent(
                     task=query_tasks[0],
                     llm=llm,
                     add_infos=add_infos,
@@ -246,7 +245,7 @@ Provide your output as a JSON formatted list. Each item in the list must adhere 
                     await page.close()
 
             else:
-                agents = [CustomAgent(
+                agents = [Agent(
                     task=task,
                     llm=llm,
                     add_infos=add_infos,
@@ -346,7 +345,7 @@ async def generate_final_report(task, history_infos, save_dir, llm, error_msg=No
     ```
     **Furthermore, ensure that the reference list is free of duplicates. Each unique source should be listed only once, regardless of how many times it is cited in the text.**
 *   **ABSOLUTE FINAL OUTPUT RESTRICTION:**  **Your output must contain ONLY the finished, publication-ready Markdown report. Do not include ANY extraneous text, phrases, preambles, meta-commentary, or markdown code indicators (e.g., "```markdown```"). The report should begin directly with the title and introductory paragraph, and end directly after the conclusion and the reference list (if applicable).**  **Your response will be deemed a failure if this instruction is not followed precisely.**
-        
+
 **Inputs:**
 
 1. **User Instruction:** The original instruction given by the user. This helps you determine what kind of information will be useful and how to structure your thinking.

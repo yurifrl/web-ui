@@ -359,6 +359,6 @@ async def test_browser_use_parallel():
 
 
 if __name__ == "__main__":
-    # asyncio.run(test_browser_use_org())
+    asyncio.run(test_browser_use_org())
     # asyncio.run(test_browser_use_parallel())
-    asyncio.run(test_browser_use_custom())
+    # asyncio.run(test_browser_use_custom())

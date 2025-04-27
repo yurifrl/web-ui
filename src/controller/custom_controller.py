@@ -1,11 +1,12 @@
 import pdb
 
 import pyperclip
-from typing import Optional, Type, Callable, Dict, Any, Union, Awaitable
+from typing import Optional, Type, Callable, Dict, Any, Union, Awaitable, TypeVar
 from pydantic import BaseModel
 from browser_use.agent.views import ActionResult
 from browser_use.browser.context import BrowserContext
 from browser_use.controller.service import Controller, DoneAction
+from browser_use.controller.registry.service import Registry, RegisteredAction
 from main_content_extractor import MainContentExtractor
 from browser_use.controller.views import (
     ClickElementAction,
@@ -21,10 +22,18 @@ from browser_use.controller.views import (
 )
 import logging
 import inspect
+import asyncio
 import os
-from src.utils import utils
+from langchain_core.language_models.chat_models import BaseChatModel
+from browser_use.agent.views import ActionModel, ActionResult
+
+from src.utils.mcp_client import create_tool_param_model, setup_mcp_client_and_tools
+
+from browser_use.utils import time_execution_sync
 
 logger = logging.getLogger(__name__)
+
+Context = TypeVar('Context')
 
 
 class CustomController(Controller):
@@ -32,11 +41,34 @@ class CustomController(Controller):
                  output_model: Optional[Type[BaseModel]] = None,
                  ask_assistant_callback: Optional[Union[Callable[[str, BrowserContext], Dict[str, Any]], Callable[
                      [str, BrowserContext], Awaitable[Dict[str, Any]]]]] = None,
-
                  ):
         super().__init__(exclude_actions=exclude_actions, output_model=output_model)
         self._register_custom_actions()
         self.ask_assistant_callback = ask_assistant_callback
+        self.mcp_client = None
+        self.mcp_server_config = None
+
+    async def setup_mcp_client(self, mcp_server_config: Optional[Dict[str, Any]] = None):
+        self.mcp_server_config = mcp_server_config
+        if self.mcp_server_config:
+            self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
+            self.register_mcp_tools()
+
+    def register_mcp_tools(self):
+        """
+        Register the MCP tools used by this controller.
+        """
+        if self.mcp_client:
+            for server_name in self.mcp_client.server_name_to_tools:
+                for tool in self.mcp_client.server_name_to_tools[server_name]:
+                    tool_name = f"mcp.{server_name}.{tool.name}"
+                    self.registry.registry.actions[tool_name] = RegisteredAction(
+                        name=tool_name,
+                        description=tool.description,
+                        function=tool,
+                        param_model=create_tool_param_model(tool),
+                    )
+                    logger.info(f"Add mcp tool: {tool_name}")
 
     def _register_custom_actions(self):
         """Register all custom browser actions"""
@@ -95,3 +127,52 @@ class CustomController(Controller):
                 msg = f'Failed to upload file to index {index}: {str(e)}'
                 logger.info(msg)
                 return ActionResult(error=msg)
+
+    @time_execution_sync('--act')
+    async def act(
+            self,
+            action: ActionModel,
+            browser_context: Optional[BrowserContext] = None,
+            #
+            page_extraction_llm: Optional[BaseChatModel] = None,
+            sensitive_data: Optional[Dict[str, str]] = None,
+            available_file_paths: Optional[list[str]] = None,
+            #
+            context: Context | None = None,
+    ) -> ActionResult:
+        """Execute an action"""
+
+        try:
+            for action_name, params in action.model_dump(exclude_unset=True).items():
+                if params is not None:
+                    if action_name.startswith("mcp"):
+                        # this is a mcp tool
+                        logger.debug(f"Invoke MCP tool: {action_name}")
+                        mcp_tool = self.registry.registry.actions.get(action_name).function
+                        result = await mcp_tool.ainvoke(params)
+                    else:
+                        result = await self.registry.execute_action(
+                            action_name,
+                            params,
+                            browser=browser_context,
+                            page_extraction_llm=page_extraction_llm,
+                            sensitive_data=sensitive_data,
+                            available_file_paths=available_file_paths,
+                            context=context,
+                        )
+
+                    if isinstance(result, str):
+                        return ActionResult(extracted_content=result)
+                    elif isinstance(result, ActionResult):
+                        return result
+                    elif result is None:
+                        return ActionResult()
+                    else:
+                        raise ValueError(f'Invalid action result type: {type(result)} of {result}')
+            return ActionResult()
+        except Exception as e:
+            raise e
+
+    async def close_mcp_client(self):
+        if self.mcp_client:
+            await self.mcp_client.__aexit__(None, None, None)
