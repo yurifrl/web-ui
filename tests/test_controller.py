@@ -46,21 +46,21 @@ async def test_controller_with_mcp():
     from browser_use.controller.registry.views import ActionModel
 
     test_server_config = {
-        # "playwright": {
-        #     "command": "npx",
-        #     "args": [
-        #         "@playwright/mcp@latest",
-        #     ],
-        #     "transport": "stdio",
-        # },
-        # "filesystem": {
-        #     "command": "npx",
-        #     "args": [
-        #         "-y",
-        #         "@modelcontextprotocol/server-filesystem",
-        #         "/Users/xxx/ai_workspace",
-        #     ]
-        # },
+        "playwright": {
+            "command": "npx",
+            "args": [
+                "@playwright/mcp@latest",
+            ],
+            "transport": "stdio",
+        },
+        "filesystem": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "/Users/xxx/ai_workspace",
+            ]
+        },
         "desktop-commander": {
             "command": "npx",
             "args": [

@@ -1,8 +1,14 @@
+import json
+import os
+
 import gradio as gr
 from gradio.components import Component
-
+from typing import Any, Dict, Optional
 from src.webui.webui_manager import WebuiManager
 from src.utils import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def update_model_dropdown(llm_provider):
@@ -17,6 +23,20 @@ def update_model_dropdown(llm_provider):
         return gr.Dropdown(choices=[], value="", interactive=True, allow_custom_value=True)
 
 
+def update_mcp_server(mcp_file: str):
+    """
+    Update the MCP server.
+    """
+    if not mcp_file or not os.path.exists(mcp_file) or mcp_file.endswith('.json'):
+        logger.warning(f"{mcp_file} is not a valid MCP file.")
+        return gr.update()
+
+    with open(mcp_file, 'r') as f:
+        mcp_server = json.load(f)
+
+    return gr.update(value=json.dumps(mcp_server, indent=2), visible=True)
+
+
 def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Component]:
     """
     Creates an agent settings tab.
@@ -28,6 +48,10 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
         with gr.Column():
             override_system_prompt = gr.Textbox(label="Override system prompt", lines=4, interactive=True)
             extend_system_prompt = gr.Textbox(label="Extend system prompt", lines=4, interactive=True)
+
+    with gr.Group():
+        mcp_json_file = gr.File(label="MCP server file", interactive=True, file_types=["json"])
+        mcp_server_config = gr.Textbox(label="MCP server", lines=6, interactive=True, visible=False)
 
     with gr.Group():
         with gr.Row():
@@ -92,7 +116,6 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
         with gr.Row():
             planner_llm_provider = gr.Dropdown(
                 choices=[provider for provider, model in config.model_names.items()],
-                value=None,
                 label="Planner LLM Provider",
                 info="Select LLM provider for LLM",
                 interactive=True
@@ -202,7 +225,8 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
         max_actions=max_actions,
         max_input_tokens=max_input_tokens,
         tool_calling_method=tool_calling_method,
-
+        mcp_json_file=mcp_json_file,
+        mcp_server_config=mcp_server_config,
     ))
     llm_provider.change(
         fn=lambda x: gr.update(visible=x == "ollama"),
@@ -223,6 +247,12 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
         lambda provider: update_model_dropdown(provider),
         inputs=[planner_llm_provider],
         outputs=planner_llm_model_name
+    )
+
+    mcp_json_file.change(
+        update_mcp_server,
+        inputs=mcp_json_file,
+        outputs=mcp_server_config
     )
 
     return tab_components

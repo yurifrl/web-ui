@@ -2,6 +2,8 @@ import gradio as gr
 
 from src.webui.webui_manager import WebuiManager
 from src.webui.components.agent_settings_tab import create_agent_settings_tab
+from src.webui.components.browser_settings_tab import create_browser_settings_tab
+from src.webui.components.browser_use_agent_tab import create_browser_use_agent_tab
 
 theme_map = {
     "Default": gr.themes.Default(),
@@ -54,10 +56,10 @@ def create_ui(theme_name="Ocean"):
                 ui_manager.add_components("agent_settings", create_agent_settings_tab(ui_manager))
 
             with gr.TabItem("🌐 Browser Settings"):
-                pass
+                ui_manager.add_components("browser_settings", create_browser_settings_tab(ui_manager))
 
             with gr.TabItem("🤖 Run Agent"):
-                pass
+                ui_manager.add_components("browser_use_agent", create_browser_use_agent_tab(ui_manager))
 
             with gr.TabItem("🧐 Deep Research"):
                 pass
