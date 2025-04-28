@@ -22,7 +22,7 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager) -> dict[str, Compo
 
     with gr.Row():
         stop_button = gr.Button("⏹️ Stop", interactive=False, variant="stop", scale=2)
-        clear_button = gr.Button("🧹 Clear", interactive=False, variant="stop", scale=2)
+        clear_button = gr.Button("🧹 Clear", interactive=True, variant="stop", scale=2)
         run_button = gr.Button("▶️ Summit", variant="primary", scale=3)
 
     browser_view = gr.HTML(

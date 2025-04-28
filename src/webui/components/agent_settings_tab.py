@@ -27,14 +27,14 @@ def update_mcp_server(mcp_file: str):
     """
     Update the MCP server.
     """
-    if not mcp_file or not os.path.exists(mcp_file) or mcp_file.endswith('.json'):
+    if not mcp_file or not os.path.exists(mcp_file) or not mcp_file.endswith('.json'):
         logger.warning(f"{mcp_file} is not a valid MCP file.")
-        return gr.update()
+        return None, gr.update(visible=False)
 
     with open(mcp_file, 'r') as f:
         mcp_server = json.load(f)
 
-    return gr.update(value=json.dumps(mcp_server, indent=2), visible=True)
+    return json.dumps(mcp_server, indent=2), gr.update(visible=True)
 
 
 def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Component]:
@@ -50,7 +50,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
             extend_system_prompt = gr.Textbox(label="Extend system prompt", lines=4, interactive=True)
 
     with gr.Group():
-        mcp_json_file = gr.File(label="MCP server file", interactive=True, file_types=["json"])
+        mcp_json_file = gr.File(label="MCP server file", interactive=True, file_types=[".json"])
         mcp_server_config = gr.Textbox(label="MCP server", lines=6, interactive=True, visible=False)
 
     with gr.Group():
@@ -202,7 +202,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
             allow_custom_value=True,
             choices=["auto", "json_schema", "function_calling", "None"],
             info="Tool Calls Function Name",
-            visible=False
+            visible=True
         )
     tab_components.update(dict(
         override_system_prompt=override_system_prompt,
@@ -252,7 +252,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
     mcp_json_file.change(
         update_mcp_server,
         inputs=mcp_json_file,
-        outputs=mcp_server_config
+        outputs=[mcp_server_config, mcp_server_config]
     )
 
     return tab_components

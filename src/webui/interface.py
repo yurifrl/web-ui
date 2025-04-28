@@ -4,6 +4,8 @@ from src.webui.webui_manager import WebuiManager
 from src.webui.components.agent_settings_tab import create_agent_settings_tab
 from src.webui.components.browser_settings_tab import create_browser_settings_tab
 from src.webui.components.browser_use_agent_tab import create_browser_use_agent_tab
+from src.webui.components.deep_research_agent_tab import create_deep_research_agent_tab
+from src.webui.components.load_save_config_tab import create_load_save_config_tab
 
 theme_map = {
     "Default": gr.themes.Default(),
@@ -37,10 +39,22 @@ def create_ui(theme_name="Ocean"):
     }
     """
 
+    # dark mode in default
+    js_func = """
+    function refresh() {
+        const url = new URL(window.location);
+
+        if (url.searchParams.get('__theme') !== 'dark') {
+            url.searchParams.set('__theme', 'dark');
+            window.location.href = url.href;
+        }
+    }
+    """
+
     ui_manager = WebuiManager()
 
     with gr.Blocks(
-            title="Browser Use WebUI", theme=theme_map[theme_name], css=css
+            title="Browser Use WebUI", theme=theme_map[theme_name], css=css, js=js_func,
     ) as demo:
         with gr.Row():
             gr.Markdown(
@@ -62,9 +76,9 @@ def create_ui(theme_name="Ocean"):
                 ui_manager.add_components("browser_use_agent", create_browser_use_agent_tab(ui_manager))
 
             with gr.TabItem("🧐 Deep Research"):
-                pass
+                ui_manager.add_components("deep_research_agent", create_deep_research_agent_tab(ui_manager))
 
-            with gr.TabItem("📁 UI Configuration"):
-                pass
+            with gr.TabItem("📁 Load & Save Config"):
+                ui_manager.add_components("load_save_config", create_load_save_config_tab(ui_manager))
 
     return demo
