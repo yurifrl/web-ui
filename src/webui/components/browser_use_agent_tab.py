@@ -657,7 +657,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             final_update.update({
                 user_input_comp: gr.update(value="", interactive=True, placeholder="Enter your next task..."),
                 run_button_comp: gr.update(value="▶️ Submit Task", interactive=True),
-                stop_button_comp: gr.update(interactive=False),
+                stop_button_comp: gr.update(value="⏹️ Stop", interactive=False),
                 pause_resume_button_comp: gr.update(value="⏸️ Pause", interactive=False),
                 clear_button_comp: gr.update(interactive=True),
                 # Ensure final chat history is shown
@@ -672,7 +672,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
         yield {
             user_input_comp: gr.update(interactive=True, placeholder="Error during setup. Enter task..."),
             run_button_comp: gr.update(value="▶️ Submit Task", interactive=True),
-            stop_button_comp: gr.update(interactive=False),
+            stop_button_comp: gr.update(value="⏹️ Stop", interactive=False),
             pause_resume_button_comp: gr.update(value="⏸️ Pause", interactive=False),
             clear_button_comp: gr.update(interactive=True),
             chatbot_comp: gr.update(
@@ -771,13 +771,13 @@ async def handle_clear(webui_manager: WebuiManager):
     if task and not task.done():
         logger.info("Clearing requires stopping the current task.")
         webui_manager.bu_agent.stop()
+        task.cancel()
         try:
             await asyncio.wait_for(task, timeout=2.0)  # Wait briefly
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
         except Exception as e:
             logger.warning(f"Error stopping task on clear: {e}")
-    webui_manager.bu_current_task.cancel()
     webui_manager.bu_current_task = None
 
     if webui_manager.bu_controller:
@@ -839,10 +839,10 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager):
             elem_id="user_input"
         )
         with gr.Row():
-            stop_button = gr.Button("⏹️ Stop", interactive=False, variant="stop", scale=1)
-            pause_resume_button = gr.Button("⏸️ Pause", interactive=False, variant="secondary", scale=1)
-            clear_button = gr.Button("🗑️ Clear", interactive=True, variant="secondary", scale=1)
-            run_button = gr.Button("▶️ Submit Task", variant="primary", scale=2)
+            stop_button = gr.Button("⏹️ Stop", interactive=False, variant="stop", scale=2)
+            pause_resume_button = gr.Button("⏸️ Pause", interactive=False, variant="secondary", scale=2, visible=False)
+            clear_button = gr.Button("🗑️ Clear", interactive=True, variant="secondary", scale=2)
+            run_button = gr.Button("▶️ Submit Task", variant="primary", scale=3)
 
         browser_view = gr.HTML(
             value="<div style='width:100%; height:50vh; display:flex; justify-content:center; align-items:center; border:1px solid #ccc; background-color:#f0f0f0;'><p>Browser View (Requires Headless=True)</p></div>",
