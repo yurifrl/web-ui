@@ -45,33 +45,37 @@ async def test_controller_with_mcp():
     from src.controller.custom_controller import CustomController
     from browser_use.controller.registry.views import ActionModel
 
-    test_server_config = {
-        "playwright": {
-            "command": "npx",
-            "args": [
-                "@playwright/mcp@latest",
-            ],
-            "transport": "stdio",
-        },
-        "filesystem": {
-            "command": "npx",
-            "args": [
-                "-y",
-                "@modelcontextprotocol/server-filesystem",
-                "/Users/xxx/ai_workspace",
-            ]
-        },
-        "desktop-commander": {
-            "command": "npx",
-            "args": [
-                "-y",
-                "@wonderwhy-er/desktop-commander"
-            ]
+    mcp_server_config = {
+        "mcpServers": {
+            "markitdown": {
+                "command": "docker",
+                "args": [
+                    "run",
+                    "--rm",
+                    "-i",
+                    "markitdown-mcp:latest"
+                ]
+            },
+            "desktop-commander": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@wonderwhy-er/desktop-commander"
+                ]
+            },
+            # "filesystem": {
+            #     "command": "npx",
+            #     "args": [
+            #         "-y",
+            #         "@modelcontextprotocol/server-filesystem",
+            #         "/Users/xxx/ai_workspace",
+            #     ]
+            # },
         }
     }
 
     controller = CustomController()
-    await controller.setup_mcp_client(test_server_config)
+    await controller.setup_mcp_client(mcp_server_config)
     action_name = "mcp.desktop-commander.execute_command"
     action_info = controller.registry.registry.actions[action_name]
     param_model = action_info.param_model
@@ -85,7 +89,8 @@ async def test_controller_with_mcp():
     result = await controller.act(action_model)
     result = result.extracted_content
     print(result)
-    if result and "Command is still running. Use read_output to get more output." in result and "PID" in result.split("\n")[0]:
+    if result and "Command is still running. Use read_output to get more output." in result and "PID" in \
+            result.split("\n")[0]:
         pid = int(result.split("\n")[0].split("PID")[-1].strip())
         action_name = "mcp.desktop-commander.read_output"
         action_info = controller.registry.registry.actions[action_name]

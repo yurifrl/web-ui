@@ -50,7 +50,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
             extend_system_prompt = gr.Textbox(label="Extend system prompt", lines=4, interactive=True)
 
     with gr.Group():
-        mcp_json_file = gr.File(label="MCP server file", interactive=True, file_types=[".json"])
+        mcp_json_file = gr.File(label="MCP server json", interactive=True, file_types=[".json"])
         mcp_server_config = gr.Textbox(label="MCP server", lines=6, interactive=True, visible=False)
 
     with gr.Group():
@@ -118,6 +118,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
                 choices=[provider for provider, model in config.model_names.items()],
                 label="Planner LLM Provider",
                 info="Select LLM provider for LLM",
+                value=None,
                 interactive=True
             )
             planner_llm_model_name = gr.Dropdown(
@@ -201,7 +202,6 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
             interactive=True,
             allow_custom_value=True,
             choices=["auto", "json_schema", "function_calling", "None"],
-            info="Tool Calls Function Name",
             visible=True
         )
     tab_components.update(dict(
@@ -228,6 +228,8 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
         mcp_json_file=mcp_json_file,
         mcp_server_config=mcp_server_config,
     ))
+    webui_manager.add_components("agent_settings", tab_components)
+
     llm_provider.change(
         fn=lambda x: gr.update(visible=x == "ollama"),
         inputs=llm_provider,
@@ -236,23 +238,21 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
     llm_provider.change(
         lambda provider: update_model_dropdown(provider),
         inputs=[llm_provider],
-        outputs=llm_model_name
+        outputs=[llm_model_name]
     )
     planner_llm_provider.change(
         fn=lambda x: gr.update(visible=x == "ollama"),
-        inputs=planner_llm_provider,
-        outputs=planner_ollama_num_ctx
+        inputs=[planner_llm_provider],
+        outputs=[planner_ollama_num_ctx]
     )
     planner_llm_provider.change(
         lambda provider: update_model_dropdown(provider),
         inputs=[planner_llm_provider],
-        outputs=planner_llm_model_name
+        outputs=[planner_llm_model_name]
     )
 
     mcp_json_file.change(
         update_mcp_server,
-        inputs=mcp_json_file,
+        inputs=[mcp_json_file],
         outputs=[mcp_server_config, mcp_server_config]
     )
-
-    return tab_components

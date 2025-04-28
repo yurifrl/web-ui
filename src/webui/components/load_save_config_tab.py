@@ -34,16 +34,17 @@ def create_load_save_config_tab(webui_manager: WebuiManager) -> dict[str, Compon
         config_file=config_file,
     ))
 
+    webui_manager.add_components("load_save_config", tab_components)
+
     save_config_button.click(
-        fn=webui_manager.save_current_config,
-        inputs=[],
+        fn=webui_manager.save_config,
+        inputs=set(webui_manager.get_components()),
         outputs=[config_status]
     )
 
     load_config_button.click(
         fn=webui_manager.load_config,
         inputs=[config_file],
-        outputs=[config_status]
+        outputs=webui_manager.get_components(),
     )
 
-    return tab_components

@@ -35,7 +35,7 @@ def create_browser_settings_tab(webui_manager: WebuiManager) -> dict[str, Compon
             )
             keep_browser_open = gr.Checkbox(
                 label="Keep Browser Open",
-                value=False,
+                value=True,
                 info="Keep Browser Open between Tasks",
                 interactive=True
             )
@@ -119,7 +119,9 @@ def create_browser_settings_tab(webui_manager: WebuiManager) -> dict[str, Compon
             save_agent_history_path=save_agent_history_path,
             save_download_path=save_download_path,
             cdp_url=cdp_url,
-            wss_url=wss_url
+            wss_url=wss_url,
+            window_h=window_h,
+            window_w=window_w,
         )
     )
-    return tab_components
+    webui_manager.add_components("browser_settings", tab_components)

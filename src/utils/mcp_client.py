@@ -40,7 +40,13 @@ async def setup_mcp_client_and_tools(mcp_server_config: Dict[str, Any]) -> Optio
 
     logger.info("Initializing MultiServerMCPClient...")
 
+    if not mcp_server_config:
+        logger.error("No MCP server configuration provided.")
+        return None
+
     try:
+        if "mcpServers" in mcp_server_config:
+            mcp_server_config = mcp_server_config["mcpServers"]
         client = MultiServerMCPClient(mcp_server_config)
         await client.__aenter__()
         return client

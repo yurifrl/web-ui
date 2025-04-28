@@ -48,28 +48,6 @@ class CustomController(Controller):
         self.mcp_client = None
         self.mcp_server_config = None
 
-    async def setup_mcp_client(self, mcp_server_config: Optional[Dict[str, Any]] = None):
-        self.mcp_server_config = mcp_server_config
-        if self.mcp_server_config:
-            self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
-            self.register_mcp_tools()
-
-    def register_mcp_tools(self):
-        """
-        Register the MCP tools used by this controller.
-        """
-        if self.mcp_client:
-            for server_name in self.mcp_client.server_name_to_tools:
-                for tool in self.mcp_client.server_name_to_tools[server_name]:
-                    tool_name = f"mcp.{server_name}.{tool.name}"
-                    self.registry.registry.actions[tool_name] = RegisteredAction(
-                        name=tool_name,
-                        description=tool.description,
-                        function=tool,
-                        param_model=create_tool_param_model(tool),
-                    )
-                    logger.info(f"Add mcp tool: {tool_name}")
-
     def _register_custom_actions(self):
         """Register all custom browser actions"""
 
@@ -172,6 +150,28 @@ class CustomController(Controller):
             return ActionResult()
         except Exception as e:
             raise e
+
+    async def setup_mcp_client(self, mcp_server_config: Optional[Dict[str, Any]] = None):
+        self.mcp_server_config = mcp_server_config
+        if self.mcp_server_config:
+            self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
+            self.register_mcp_tools()
+
+    def register_mcp_tools(self):
+        """
+        Register the MCP tools used by this controller.
+        """
+        if self.mcp_client:
+            for server_name in self.mcp_client.server_name_to_tools:
+                for tool in self.mcp_client.server_name_to_tools[server_name]:
+                    tool_name = f"mcp.{server_name}.{tool.name}"
+                    self.registry.registry.actions[tool_name] = RegisteredAction(
+                        name=tool_name,
+                        description=tool.description,
+                        function=tool,
+                        param_model=create_tool_param_model(tool),
+                    )
+                    logger.info(f"Add mcp tool: {tool_name}")
 
     async def close_mcp_client(self):
         if self.mcp_client:

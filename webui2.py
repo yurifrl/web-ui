@@ -42,77 +42,6 @@ _global_browser = None
 _global_browser_context = None
 _global_agent = None
 
-# Create the global agent state instance
-_global_agent_state = AgentState()
-
-# webui config
-webui_config_manager = utils.ConfigManager()
-
-
-def scan_and_register_components(blocks):
-    """扫描一个 Blocks 对象并注册其中的所有交互式组件，但不包括按钮"""
-    global webui_config_manager
-
-    def traverse_blocks(block, prefix=""):
-        registered = 0
-
-        # 处理 Blocks 自身的组件
-        if hasattr(block, "children"):
-            for i, child in enumerate(block.children):
-                if isinstance(child, gr.components.Component):
-                    # 排除按钮 (Button) 组件
-                    if getattr(child, "interactive", False) and not isinstance(child, gr.Button):
-                        name = f"{prefix}component_{i}"
-                        if hasattr(child, "label") and child.label:
-                            # 使用标签作为名称的一部分
-                            label = child.label
-                            name = f"{prefix}{label}"
-                        logger.debug(f"Registering component: {name}")
-                        webui_config_manager.register_component(name, child)
-                        registered += 1
-                elif hasattr(child, "children"):
-                    # 递归处理嵌套的 Blocks
-                    new_prefix = f"{prefix}block_{i}_"
-                    registered += traverse_blocks(child, new_prefix)
-
-        return registered
-
-    total = traverse_blocks(blocks)
-    logger.info(f"Total registered components: {total}")
-
-
-def save_current_config():
-    return webui_config_manager.save_current_config()
-
-
-def update_ui_from_config(config_file):
-    return webui_config_manager.update_ui_from_config(config_file)
-
-
-def resolve_sensitive_env_variables(text):
-    """
-    Replace environment variable placeholders ($SENSITIVE_*) with their values.
-    Only replaces variables that start with SENSITIVE_.
-    """
-    if not text:
-        return text
-
-    import re
-
-    # Find all $SENSITIVE_* patterns
-    env_vars = re.findall(r'\$SENSITIVE_[A-Za-z0-9_]*', text)
-
-    result = text
-    for var in env_vars:
-        # Remove the $ prefix to get the actual environment variable name
-        env_name = var[1:]  # removes the $
-        env_value = os.getenv(env_name)
-        if env_value is not None:
-            # Replace $SENSITIVE_VAR_NAME with its value
-            result = result.replace(var, env_value)
-
-    return result
-
 
 async def stop_agent():
     """Request the agent to stop and update UI with enhanced feedback"""
@@ -128,32 +57,6 @@ async def stop_agent():
 
         # Return UI updates
         return (
-            gr.update(value="Stopping...", interactive=False),  # stop_button
-            gr.update(interactive=False),  # run_button
-        )
-    except Exception as e:
-        error_msg = f"Error during stop: {str(e)}"
-        logger.error(error_msg)
-        return (
-            gr.update(value="Stop", interactive=True),
-            gr.update(interactive=True)
-        )
-
-
-async def stop_research_agent():
-    """Request the agent to stop and update UI with enhanced feedback"""
-    global _global_agent_state
-
-    try:
-        # Request stop
-        _global_agent_state.request_stop()
-
-        # Update UI immediately
-        message = "Stop requested - the agent will halt at the next safe point"
-        logger.info(f"🛑 {message}")
-
-        # Return UI updates
-        return (  # errors_output
             gr.update(value="Stopping...", interactive=False),  # stop_button
             gr.update(interactive=False),  # run_button
         )
@@ -201,16 +104,6 @@ async def run_browser_agent(
         # Ensure the recording directory exists if recording is enabled
         if save_recording_path:
             os.makedirs(save_recording_path, exist_ok=True)
-
-        # Get the list of existing videos before the agent runs
-        existing_videos = set()
-        if save_recording_path:
-            existing_videos = set(
-                glob.glob(os.path.join(save_recording_path, "*.[mM][pP]4"))
-                + glob.glob(os.path.join(save_recording_path, "*.[wW][eE][bB][mM]"))
-            )
-
-        task = resolve_sensitive_env_variables(task)
 
         # Run the agent
         llm = utils.get_llm_model(

@@ -32,6 +32,9 @@ def create_ui(theme_name="Ocean"):
         text-align: center;
         margin-bottom: 20px;
     }
+    .tab-header-text {
+        text-align: center;
+    }
     .theme-section {
         margin-bottom: 10px;
         padding: 15px;
@@ -67,18 +70,26 @@ def create_ui(theme_name="Ocean"):
 
         with gr.Tabs() as tabs:
             with gr.TabItem("⚙️ Agent Settings"):
-                ui_manager.add_components("agent_settings", create_agent_settings_tab(ui_manager))
+                create_agent_settings_tab(ui_manager)
 
             with gr.TabItem("🌐 Browser Settings"):
-                ui_manager.add_components("browser_settings", create_browser_settings_tab(ui_manager))
+                create_browser_settings_tab(ui_manager)
 
             with gr.TabItem("🤖 Run Agent"):
-                ui_manager.add_components("browser_use_agent", create_browser_use_agent_tab(ui_manager))
+                create_browser_use_agent_tab(ui_manager)
 
-            with gr.TabItem("🧐 Deep Research"):
-                ui_manager.add_components("deep_research_agent", create_deep_research_agent_tab(ui_manager))
+            with gr.TabItem("🎁 Agent Collections"):
+                gr.Markdown(
+                    """
+                    ### Agents built on Browser-Use
+                    """,
+                    elem_classes=["tab-header-text"],
+                )
+                with gr.Tabs():
+                    with gr.TabItem("Deep Research"):
+                        create_deep_research_agent_tab(ui_manager)
 
             with gr.TabItem("📁 Load & Save Config"):
-                ui_manager.add_components("load_save_config", create_load_save_config_tab(ui_manager))
+                create_load_save_config_tab(ui_manager)
 
     return demo

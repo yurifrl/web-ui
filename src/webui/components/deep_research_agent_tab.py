@@ -38,4 +38,4 @@ def create_deep_research_agent_tab(webui_manager: WebuiManager) -> dict[str, Com
             markdown_download=markdown_download,
         )
     )
-    return tab_components
+    webui_manager.add_components("deep_research_agent", tab_components)
