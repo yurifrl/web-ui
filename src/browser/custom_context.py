@@ -6,6 +6,8 @@ from browser_use.browser.browser import Browser, IN_DOCKER
 from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from playwright.async_api import Browser as PlaywrightBrowser
 from playwright.async_api import BrowserContext as PlaywrightBrowserContext
+from typing import Optional
+from browser_use.browser.context import BrowserContextState
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +19,11 @@ class CustomBrowserContextConfig(BrowserContextConfig):
 class CustomBrowserContext(BrowserContext):
     def __init__(
             self,
-            browser: "Browser",
-            config: CustomBrowserContextConfig = CustomBrowserContextConfig(),
+            browser: 'Browser',
+            config: BrowserContextConfig | None = None,
+            state: Optional[BrowserContextState] = None,
     ):
-        super(CustomBrowserContext, self).__init__(browser=browser, config=config)
+        super(CustomBrowserContext, self).__init__(browser=browser, config=config, state=state)
 
     async def _create_context(self, browser: PlaywrightBrowser):
         """Creates a new browser context with anti-detection measures and loads cookies if available."""

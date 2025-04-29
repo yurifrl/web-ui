@@ -78,7 +78,7 @@ def create_ui(theme_name="Ocean"):
             with gr.TabItem("🤖 Run Agent"):
                 create_browser_use_agent_tab(ui_manager)
 
-            with gr.TabItem("🎁 Agent Collections"):
+            with gr.TabItem("🎁 Agent Marketplace"):
                 gr.Markdown(
                     """
                     ### Agents built on Browser-Use

@@ -12,7 +12,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 import base64
 from browser_use.browser.browser import Browser, BrowserConfig
 from browser_use.browser.context import BrowserContext, BrowserContextConfig, BrowserContextWindowSize
-from browser_use.agent.service import Agent
+# from browser_use.agent.service import Agent
 from browser_use.agent.views import AgentHistoryList
 from browser_use.agent.views import ToolCallingMethod  # Adjust import
 from browser_use.agent.views import (
@@ -37,6 +37,7 @@ from src.controller.custom_controller import CustomController
 from src.utils import llm_provider
 from src.browser.custom_browser import CustomBrowser
 from src.browser.custom_context import CustomBrowserContext, CustomBrowserContextConfig
+from src.agent.browser_use.browser_use_agent import BrowserUseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ async def _handle_new_step(webui_manager: WebuiManager, state: BrowserState, out
             # Basic validation: check if it looks like base64
             if isinstance(screenshot_data, str) and len(screenshot_data) > 100:  # Arbitrary length check
                 # *** UPDATED STYLE: Removed centering, adjusted width ***
-                img_tag = f'<img src="data:image/jpeg;base64,{screenshot_data}" alt="Step {step_num} Screenshot" style="max-width: 600px; max-height: 300px; object-fit:contain; margin-bottom: 10px;" />'
+                img_tag = f'<img src="data:image/jpeg;base64,{screenshot_data}" alt="Step {step_num} Screenshot" style="max-width: 800px; max-height: 600px; object-fit:contain;" />'
                 screenshot_html = img_tag + "<br/>"  # Use <br/> for line break after inline-block image
             else:
                 logger.warning(
@@ -232,44 +233,6 @@ async def _ask_assistant_callback(webui_manager: WebuiManager, query: str, brows
     webui_manager.bu_chat_history.append({"role": "user", "content": response})  # Show user response in chat
     webui_manager.bu_response_event = None  # Clear the event for the next potential request
     return {"response": response}
-
-
-async def capture_screenshot(browser_context):
-    """Capture and encode a screenshot"""
-    # Extract the Playwright browser instance
-    playwright_browser = browser_context.browser.playwright_browser  # Ensure this is correct.
-
-    # Check if the browser instance is valid and if an existing context can be reused
-    if playwright_browser and playwright_browser.contexts:
-        playwright_context = playwright_browser.contexts[0]
-    else:
-        return None
-
-    # Access pages in the context
-    pages = None
-    if playwright_context:
-        pages = playwright_context.pages
-
-    # Use an existing page or create a new one if none exist
-    if pages:
-        active_page = pages[0]
-        for page in pages:
-            if page.url != "about:blank":
-                active_page = page
-    else:
-        return None
-
-    # Take screenshot
-    try:
-        screenshot = await active_page.screenshot(
-            type='jpeg',
-            quality=75,
-            scale="css"
-        )
-        encoded = base64.b64encode(screenshot).decode('utf-8')
-        return encoded
-    except Exception as e:
-        return None
 
 
 # --- Core Agent Execution Logic --- (Needs access to webui_manager)
@@ -372,8 +335,8 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
     save_agent_history_path = get_browser_setting("save_agent_history_path", "./tmp/agent_history")
     save_download_path = get_browser_setting("save_download_path", "./tmp/downloads")
 
-    stream_vw = 80
-    stream_vh = int(80 * window_h // window_w)
+    stream_vw = 70
+    stream_vh = int(70 * window_h // window_w)
 
     os.makedirs(save_agent_history_path, exist_ok=True)
     if save_recording_path: os.makedirs(save_recording_path, exist_ok=True)
@@ -470,7 +433,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             if not webui_manager.bu_browser or not webui_manager.bu_browser_context:
                 raise ValueError("Browser or Context not initialized, cannot create agent.")
 
-            webui_manager.bu_agent = Agent(
+            webui_manager.bu_agent = BrowserUseAgent(
                 task=task,
                 llm=main_llm,
                 browser=webui_manager.bu_browser,
@@ -478,7 +441,6 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
                 controller=webui_manager.bu_controller,
                 register_new_step_callback=step_callback_wrapper,
                 register_done_callback=done_callback_wrapper,
-                # Agent settings
                 use_vision=use_vision,
                 override_system_message=override_system_prompt,
                 extend_system_message=extend_system_prompt,
@@ -486,8 +448,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
                 max_actions_per_step=max_actions,
                 tool_calling_method=tool_calling_method,
                 planner_llm=planner_llm,
-                use_vision_for_planner=planner_use_vision if planner_llm else False,
-                save_conversation_path=history_file,
+                use_vision_for_planner=planner_use_vision if planner_llm else False
             )
             webui_manager.bu_agent.state.agent_id = webui_manager.bu_agent_task_id
             webui_manager.bu_agent.settings.generate_gif = gif_path
@@ -510,8 +471,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             if is_paused:
                 yield {
                     pause_resume_button_comp: gr.update(value="▶️ Resume", interactive=True),
-                    run_button_comp: gr.update(value="⏸️ Paused", interactive=False),
-                    stop_button_comp: gr.update(interactive=True),  # Allow stop while paused
+                    stop_button_comp: gr.update(interactive=True),
                 }
                 # Wait until pause is released or task is stopped/done
                 while is_paused and not agent_task.done():
@@ -580,7 +540,7 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             # Update Browser View
             if headless and webui_manager.bu_browser_context:
                 try:
-                    screenshot_b64 = await capture_screenshot(webui_manager.bu_browser_context)
+                    screenshot_b64 = await webui_manager.bu_browser_context.take_screenshot()
                     if screenshot_b64:
                         html_content = f'<img src="data:image/jpeg;base64,{screenshot_b64}" style="width:{stream_vw}vw; height:{stream_vh}vh ; border:1px solid #ccc;">'
                         update_dict[browser_view_comp] = gr.update(value=html_content, visible=True)
@@ -840,7 +800,7 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager):
         )
         with gr.Row():
             stop_button = gr.Button("⏹️ Stop", interactive=False, variant="stop", scale=2)
-            pause_resume_button = gr.Button("⏸️ Pause", interactive=False, variant="secondary", scale=2, visible=False)
+            pause_resume_button = gr.Button("⏸️ Pause", interactive=False, variant="secondary", scale=2, visible=True)
             clear_button = gr.Button("🗑️ Clear", interactive=True, variant="secondary", scale=2)
             run_button = gr.Button("▶️ Submit Task", variant="primary", scale=3)
 
@@ -918,4 +878,3 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager):
         inputs=None,
         outputs=run_tab_outputs
     )
-

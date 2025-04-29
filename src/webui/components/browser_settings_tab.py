@@ -1,11 +1,28 @@
 import gradio as gr
+import logging
 from gradio.components import Component
 
 from src.webui.webui_manager import WebuiManager
 from src.utils import config
 
+logger = logging.getLogger(__name__)
 
-def create_browser_settings_tab(webui_manager: WebuiManager) -> dict[str, Component]:
+async def close_browser(webui_manager: WebuiManager):
+    """
+    Close browser
+    """
+    if webui_manager.bu_current_task and not webui_manager.bu_current_task.done():
+        webui_manager.bu_current_task.cancel()
+        webui_manager.bu_current_task = None
+    if webui_manager.bu_browser:
+        await webui_manager.bu_browser.close()
+        webui_manager.bu_browser = None
+    if webui_manager.bu_browser_context:
+        await webui_manager.bu_browser_context.close()
+        webui_manager.bu_browser_context = None
+
+
+def create_browser_settings_tab(webui_manager: WebuiManager):
     """
     Creates a browser settings tab.
     """
@@ -125,3 +142,12 @@ def create_browser_settings_tab(webui_manager: WebuiManager) -> dict[str, Compon
         )
     )
     webui_manager.add_components("browser_settings", tab_components)
+
+    async def close_wrapper():
+        """Wrapper for handle_clear."""
+        await close_browser(webui_manager)
+
+    headless.change(close_wrapper)
+    keep_browser_open.change(close_wrapper)
+    disable_security.change(close_wrapper)
+    use_own_browser.change(close_wrapper)

@@ -15,29 +15,30 @@ from playwright.async_api import BrowserContext as PlaywrightBrowserContext
 import logging
 
 from browser_use.browser.chrome import (
-	CHROME_ARGS,
-	CHROME_DETERMINISTIC_RENDERING_ARGS,
-	CHROME_DISABLE_SECURITY_ARGS,
-	CHROME_DOCKER_ARGS,
-	CHROME_HEADLESS_ARGS,
+    CHROME_ARGS,
+    CHROME_DETERMINISTIC_RENDERING_ARGS,
+    CHROME_DISABLE_SECURITY_ARGS,
+    CHROME_DOCKER_ARGS,
+    CHROME_HEADLESS_ARGS,
 )
 from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from browser_use.browser.utils.screen_resolution import get_screen_resolution, get_window_adjustments
 from browser_use.utils import time_execution_async
 import socket
 
-from .custom_context import CustomBrowserContext
+from .custom_context import CustomBrowserContext, CustomBrowserContextConfig
 
 logger = logging.getLogger(__name__)
 
 
 class CustomBrowser(Browser):
 
-    async def new_context(
-            self,
-            config: BrowserContextConfig = BrowserContextConfig()
-    ) -> CustomBrowserContext:
-        return CustomBrowserContext(config=config, browser=self)
+    async def new_context(self, config: CustomBrowserContextConfig | None = None) -> CustomBrowserContext:
+        """Create a browser context"""
+        browser_config = self.config.model_dump() if self.config else {}
+        context_config = config.model_dump() if config else {}
+        merged_config = {**browser_config, **context_config}
+        return CustomBrowserContext(config=CustomBrowserContextConfig(**merged_config), browser=self)
 
     async def _setup_builtin_browser(self, playwright: Playwright) -> PlaywrightBrowser:
         """Sets up and returns a Playwright Browser instance with anti-detection measures."""
