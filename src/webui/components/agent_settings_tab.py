@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from src.webui.webui_manager import WebuiManager
 from src.utils import config
 import logging
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,15 @@ def update_model_dropdown(llm_provider):
         return gr.Dropdown(choices=[], value="", interactive=True, allow_custom_value=True)
 
 
-def update_mcp_server(mcp_file: str):
+def update_mcp_server(mcp_file: str, webui_manager: WebuiManager):
     """
     Update the MCP server.
     """
+    if hasattr(webui_manager, "bu_controller") and webui_manager.bu_controller:
+        logger.warning("⚠️ Close controller because mcp file has changed!")
+        webui_manager.bu_controller.close_mcp_client()
+        webui_manager.bu_controller = None
+
     if not mcp_file or not os.path.exists(mcp_file) or not mcp_file.endswith('.json'):
         logger.warning(f"{mcp_file} is not a valid MCP file.")
         return None, gr.update(visible=False)
@@ -37,7 +43,7 @@ def update_mcp_server(mcp_file: str):
     return json.dumps(mcp_server, indent=2), gr.update(visible=True)
 
 
-def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Component]:
+def create_agent_settings_tab(webui_manager: WebuiManager):
     """
     Creates an agent settings tab.
     """
@@ -252,7 +258,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager) -> dict[str, Componen
     )
 
     mcp_json_file.change(
-        update_mcp_server,
+        partial(update_mcp_server, webui_manager=webui_manager),
         inputs=[mcp_json_file],
         outputs=[mcp_server_config, mcp_server_config]
     )

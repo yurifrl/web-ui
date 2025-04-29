@@ -1,3 +1,5 @@
+import pdb
+
 import gradio as gr
 from gradio.components import Component
 import asyncio
@@ -388,7 +390,6 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
                     extra_args += [f"--user-data-dir={chrome_user_data}"]
             else:
                 browser_binary_path = None
-
             webui_manager.bu_browser = CustomBrowser(
                 config=BrowserConfig(
                     headless=headless,
@@ -432,7 +433,6 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             logger.info(f"Initializing new agent for task: {task}")
             if not webui_manager.bu_browser or not webui_manager.bu_browser_context:
                 raise ValueError("Browser or Context not initialized, cannot create agent.")
-
             webui_manager.bu_agent = BrowserUseAgent(
                 task=task,
                 llm=main_llm,
@@ -456,6 +456,9 @@ async def run_agent_task(webui_manager: WebuiManager, components: Dict[gr.compon
             webui_manager.bu_agent.state.agent_id = webui_manager.bu_agent_task_id
             webui_manager.bu_agent.add_new_task(task)
             webui_manager.bu_agent.settings.generate_gif = gif_path
+            webui_manager.bu_agent.browser = webui_manager.bu_browser
+            webui_manager.bu_agent.browser_context = webui_manager.bu_browser_context
+            webui_manager.bu_agent.controller = webui_manager.bu_controller
 
         # --- 6. Run Agent Task and Stream Updates ---
         agent_run_coro = webui_manager.bu_agent.run(max_steps=max_steps)
@@ -832,15 +835,13 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager):
 
     async def submit_wrapper(components_dict: Dict[Component, Any]) -> AsyncGenerator[Dict[Component, Any], None]:
         """Wrapper for handle_submit that yields its results."""
-        # handle_submit is an async generator, iterate and yield
         async for update in handle_submit(webui_manager, components_dict):
             yield update
 
     async def stop_wrapper() -> AsyncGenerator[Dict[Component, Any], None]:
         """Wrapper for handle_stop."""
-        # handle_stop is async def but returns a single dict. We yield it once.
         update_dict = await handle_stop(webui_manager)
-        yield update_dict  # Yield the final dictionary
+        yield update_dict
 
     async def pause_resume_wrapper() -> AsyncGenerator[Dict[Component, Any], None]:
         """Wrapper for handle_pause_resume."""

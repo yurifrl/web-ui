@@ -1,386 +1,886 @@
-import pdb
-
-from dotenv import load_dotenv
-
-load_dotenv()
 import asyncio
-import os
-import sys
-import logging
-from pprint import pprint
-from uuid import uuid4
-from src.utils import utils
 import json
-import re
-from browser_use.agent.service import Agent
-from browser_use.browser.browser import BrowserConfig, Browser
-from browser_use.agent.views import ActionResult
-from browser_use.browser.context import BrowserContext
-from browser_use.controller.service import Controller, DoneAction
-from main_content_extractor import MainContentExtractor
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    ToolMessage,
-    SystemMessage
-)
-from json_repair import repair_json
+import logging
+import os
+import uuid
+from pathlib import Path
+from typing import List, Dict, Any, TypedDict, Optional, Sequence, Annotated
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+# Langchain imports
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.tools import Tool, StructuredTool
+from langchain.agents import AgentExecutor  # We might use parts, but Langgraph is primary
+from langchain_community.tools.file_management import WriteFileTool, ReadFileTool, CopyFileTool, ListDirectoryTool, \
+    MoveFileTool, FileSearchTool
+from langchain_openai import ChatOpenAI  # Replace with your actual LLM import
+
+from browser_use.browser.browser import BrowserConfig
+from browser_use.browser.context import BrowserContextWindowSize
+
+# Langgraph imports
+from langgraph.graph import StateGraph, END
 from src.controller.custom_controller import CustomController
+from src.utils import llm_provider
 from src.browser.custom_browser import CustomBrowser
-from src.browser.custom_context import BrowserContextConfig, BrowserContext
-from browser_use.browser.context import (
-    BrowserContextConfig,
-    BrowserContextWindowSize,
-)
-from browser_use.agent.service import Agent
+from src.browser.custom_context import CustomBrowserContext, CustomBrowserContextConfig
+from src.agent.browser_use.browser_use_agent import BrowserUseAgent
+from src.utils.mcp_client import setup_mcp_client_and_tools
 
 logger = logging.getLogger(__name__)
 
+# Constants
+TMP_DIR = Path("./tmp/deep_research")
+os.makedirs(TMP_DIR, exist_ok=True)
+REPORT_FILENAME = "report.md"
+PLAN_FILENAME = "research_plan.md"
+SEARCH_INFO_FILENAME = "search_info.json"
+MAX_PARALLEL_BROWSERS = 2
 
-async def deep_research(task, llm, agent_state=None, **kwargs):
-    task_id = str(uuid4())
-    save_dir = kwargs.get("save_dir", os.path.join(f"./tmp/deep_research/{task_id}"))
-    logger.info(f"Save Deep Research at: {save_dir}")
-    os.makedirs(save_dir, exist_ok=True)
+_AGENT_STOP_FLAGS = {}
+_BROWSER_AGENT_INSTANCES = {}  # To store running browser agents for stopping
 
-    # max qyery num per iteration
-    max_query_num = kwargs.get("max_query_num", 3)
 
-    use_own_browser = kwargs.get("use_own_browser", False)
-    extra_chromium_args = []
+async def run_single_browser_task(
+        task_query: str,
+        task_id: str,
+        llm: Any,  # Pass the main LLM
+        browser_config: Dict[str, Any],
+        stop_event: threading.Event,
+        use_vision: bool = False,
+) -> Dict[str, Any]:
+    """
+    Runs a single BrowserUseAgent task.
+    Manages browser creation and closing for this specific task.
+    """
+    if not BrowserUseAgent:
+        return {"query": task_query, "error": "BrowserUseAgent components not available."}
 
-    if use_own_browser:
-        cdp_url = os.getenv("CHROME_CDP", kwargs.get("chrome_cdp", None))
-        # TODO: if use own browser, max query num must be 1 per iter, how to solve it?
-        max_query_num = 1
-        chrome_path = os.getenv("CHROME_PATH", None)
-        if chrome_path == "":
-            chrome_path = None
-        chrome_user_data = os.getenv("CHROME_USER_DATA", None)
-        if chrome_user_data:
-            extra_chromium_args += [f"--user-data-dir={chrome_user_data}"]
+    # --- Browser Setup ---
+    # These should ideally come from the main agent's config
+    headless = browser_config.get("headless", False)
+    window_w = browser_config.get("window_width", 1280)
+    window_h = browser_config.get("window_height", 1100)
+    browser_user_data_dir = browser_config.get("user_data_dir", None)
+    use_own_browser = browser_config.get("use_own_browser", False)
+    browser_binary_path = browser_config.get("browser_binary_path", None)
+    wss_url = browser_config.get("wss_url", None)
+    cdp_url = browser_config.get("cdp_url", None)
+    disable_security = browser_config.get("disable_security", False)
 
-        browser = CustomBrowser(
+    bu_browser = None
+    bu_browser_context = None
+    try:
+        logger.info(f"Starting browser task for query: {task_query}")
+        extra_args = [f"--window-size={window_w},{window_h}"]
+        if browser_user_data_dir:
+            extra_args.append(f"--user-data-dir={browser_user_data_dir}")
+        if use_own_browser:
+            browser_binary_path = os.getenv("CHROME_PATH", None) or browser_binary_path
+            if browser_binary_path == "": browser_binary_path = None
+            chrome_user_data = os.getenv("CHROME_USER_DATA", None)
+            if chrome_user_data: extra_args += [f"--user-data-dir={chrome_user_data}"]
+        else:
+            browser_binary_path = None
+
+        bu_browser = CustomBrowser(
             config=BrowserConfig(
-                headless=kwargs.get("headless", False),
+                headless=headless,
+                disable_security=disable_security,
+                browser_binary_path=browser_binary_path,
+                extra_browser_args=extra_args,
+                wss_url=wss_url,
                 cdp_url=cdp_url,
-                disable_security=kwargs.get("disable_security", True),
-                chrome_instance_path=chrome_path,
-                extra_chromium_args=extra_chromium_args,
             )
         )
-        browser_context = await browser.new_context()
-    else:
-        browser = None
-        browser_context = None
 
-    controller = CustomController()
-
-    @controller.registry.action(
-        'Extract page content to get the pure markdown.',
-    )
-    async def extract_content(browser: BrowserContext):
-        page = await browser.get_current_page()
-        # use jina reader
-        url = page.url
-
-        jina_url = f"https://r.jina.ai/{url}"
-        await page.goto(jina_url)
-        output_format = 'markdown'
-        content = MainContentExtractor.extract(  # type: ignore
-            html=await page.content(),
-            output_format=output_format,
+        context_config = CustomBrowserContextConfig(
+            save_downloads_path="./tmp/downloads",
+            browser_window_size=BrowserContextWindowSize(width=window_w, height=window_h),
+            force_new_context=True
         )
-        # go back to org url
-        await page.go_back()
-        msg = f'Extracted page content:\n{content}\n'
-        logger.info(msg)
-        return ActionResult(extracted_content=msg)
+        bu_browser_context = await bu_browser.new_context(config=context_config)
 
-    search_system_prompt = f"""
-    You are a **Deep Researcher**, an AI agent specializing in in-depth information gathering and research using a web browser with **automated execution capabilities**. Your expertise lies in formulating comprehensive research plans and executing them meticulously to fulfill complex user requests. You will analyze user instructions, devise a detailed research plan, and determine the necessary search queries to gather the required information.
+        # Simple controller example, replace with your actual implementation if needed
+        bu_controller = CustomController()
 
-    **Your Task:**
-
-    Given a user's research topic, you will:
-
-    1. **Develop a Research Plan:** Outline the key aspects and subtopics that need to be investigated to thoroughly address the user's request. This plan should be a high-level overview of the research direction.
-    2. **Generate Search Queries:** Based on your research plan, generate a list of specific search queries to be executed in a web browser. These queries should be designed to efficiently gather relevant information for each aspect of your plan.
-
-    **Output Format:**
-
-    Your output will be a JSON object with the following structure:
-
-    ```json
-    {{
-    "plan": "A concise, high-level research plan outlining the key areas to investigate.",
-      "queries": [
-        "search query 1",
-        "search query 2",
-        //... up to a maximum of {max_query_num} search queries
-      ]
-    }}
-    ```
-
-    **Important:**
-
-    *   Limit your output to a **maximum of {max_query_num}** search queries.
-    *   Make the search queries to help the automated agent find the needed information. Consider what keywords are most likely to lead to useful results.
-    *   If you have gathered for all the information you want and no further search queries are required, output queries with an empty list: `[]`
-    *   Make sure output search queries are different from the history queries.
-
-    **Inputs:**
-
-    1.  **User Instruction:** The original instruction given by the user.
-    2.  **Previous Queries:** History Queries.
-    3.  **Previous Search Results:** Textual data gathered from prior search queries. If there are no previous search results this string will be empty.
-    """
-    search_messages = [SystemMessage(content=search_system_prompt)]
-
-    record_system_prompt = """
-    You are an expert information recorder. Your role is to process user instructions, current search results, and previously recorded information to extract, summarize, and record new, useful information that helps fulfill the user's request. Your output will be a JSON formatted list, where each element represents a piece of extracted information and follows the structure: `{"url": "source_url", "title": "source_title", "summary_content": "concise_summary", "thinking": "reasoning"}`.
-
-**Important Considerations:**
-
-1. **Minimize Information Loss:** While concise, prioritize retaining important details and nuances from the sources. Aim for a summary that captures the essence of the information without over-simplification. **Crucially, ensure to preserve key data and figures within the `summary_content`. This is essential for later stages, such as generating tables and reports.**
-
-2. **Avoid Redundancy:** Do not record information that is already present in the Previous Recorded Information. Check for semantic similarity, not just exact matches. However, if the same information is expressed differently in a new source and this variation adds valuable context or clarity, it should be included.
-
-3. **Source Information:** Extract and include the source title and URL for each piece of information summarized. This is crucial for verification and context. **The Current Search Results are provided in a specific format, where each item starts with "Title:", followed by the title, then "URL Source:", followed by the URL, and finally "Markdown Content:", followed by the content. Please extract the title and URL from this structure.** If a piece of information cannot be attributed to a specific source from the provided search results, use `"url": "unknown"` and `"title": "unknown"`.
-
-4. **Thinking and Report Structure:**  For each extracted piece of information, add a `"thinking"` key. This field should contain your assessment of how this information could be used in a report, which section it might belong to (e.g., introduction, background, analysis, conclusion, specific subtopics), and any other relevant thoughts about its significance or connection to other information.
-
-**Output Format:**
-
-Provide your output as a JSON formatted list. Each item in the list must adhere to the following format:
-
-```json
-[
-  {
-    "url": "source_url_1",
-    "title": "source_title_1",
-    "summary_content": "Concise summary of content. Remember to include key data and figures here.",
-    "thinking": "This could be used in the introduction to set the context. It also relates to the section on the history of the topic."
-  },
-  // ... more entries
-  {
-    "url": "unknown",
-    "title": "unknown",
-    "summary_content": "concise_summary_of_content_without_clear_source",
-    "thinking": "This might be useful background information, but I need to verify its accuracy. Could be used in the methodology section to explain how data was collected."
-  }
-]
-```
-
-**Inputs:**
-
-1. **User Instruction:** The original instruction given by the user. This helps you determine what kind of information will be useful and how to structure your thinking.
-2. **Previous Recorded Information:** Textual data gathered and recorded from previous searches and processing, represented as a single text string.
-3. **Current Search Plan:** Research plan for current search.
-4. **Current Search Query:** The current search query.
-5. **Current Search Results:** Textual data gathered from the most recent search query.
-    """
-    record_messages = [SystemMessage(content=record_system_prompt)]
-
-    search_iteration = 0
-    max_search_iterations = kwargs.get("max_search_iterations", 10)  # Limit search iterations to prevent infinite loop
-    use_vision = kwargs.get("use_vision", False)
-
-    history_query = []
-    history_infos = []
-    try:
-        while search_iteration < max_search_iterations:
-            search_iteration += 1
-            logger.info(f"Start {search_iteration}th Search...")
-            history_query_ = json.dumps(history_query, indent=4)
-            history_infos_ = json.dumps(history_infos, indent=4)
-            query_prompt = f"This is search {search_iteration} of {max_search_iterations} maximum searches allowed.\n User Instruction:{task} \n Previous Queries:\n {history_query_} \n Previous Search Results:\n {history_infos_}\n"
-            search_messages.append(HumanMessage(content=query_prompt))
-            ai_query_msg = llm.invoke(search_messages[:1] + search_messages[1:][-1:])
-            search_messages.append(ai_query_msg)
-            if hasattr(ai_query_msg, "reasoning_content"):
-                logger.info("🤯 Start Search Deep Thinking: ")
-                logger.info(ai_query_msg.reasoning_content)
-                logger.info("🤯 End Search Deep Thinking")
-            ai_query_content = ai_query_msg.content.replace("```json", "").replace("```", "")
-            ai_query_content = repair_json(ai_query_content)
-            ai_query_content = json.loads(ai_query_content)
-            query_plan = ai_query_content["plan"]
-            logger.info(f"Current Iteration {search_iteration} Planing:")
-            logger.info(query_plan)
-            query_tasks = ai_query_content["queries"]
-            if not query_tasks:
-                break
-            else:
-                query_tasks = query_tasks[:max_query_num]
-                history_query.extend(query_tasks)
-                logger.info("Query tasks:")
-                logger.info(query_tasks)
-
-            # 2. Perform Web Search and Auto exec
-            # Parallel BU agents
-            add_infos = "1. Please click on the most relevant link to get information and go deeper, instead of just staying on the search page. \n" \
-                        "2. When opening a PDF file, please remember to extract the content using extract_content instead of simply opening it for the user to view.\n"
-            if use_own_browser:
-                agent = Agent(
-                    task=query_tasks[0],
-                    llm=llm,
-                    add_infos=add_infos,
-                    browser=browser,
-                    browser_context=browser_context,
-                    use_vision=use_vision,
-                    system_prompt_class=CustomSystemPrompt,
-                    agent_prompt_class=CustomAgentMessagePrompt,
-                    max_actions_per_step=5,
-                    controller=controller
-                )
-                agent_result = await agent.run(max_steps=kwargs.get("max_steps", 10))
-                query_results = [agent_result]
-                # Manually close all tab
-                session = await browser_context.get_session()
-                pages = session.context.pages
-                await browser_context.create_new_tab()
-                for page_id, page in enumerate(pages):
-                    await page.close()
-
-            else:
-                agents = [Agent(
-                    task=task,
-                    llm=llm,
-                    add_infos=add_infos,
-                    browser=browser,
-                    browser_context=browser_context,
-                    use_vision=use_vision,
-                    system_prompt_class=CustomSystemPrompt,
-                    agent_prompt_class=CustomAgentMessagePrompt,
-                    max_actions_per_step=5,
-                    controller=controller,
-                ) for task in query_tasks]
-                query_results = await asyncio.gather(
-                    *[agent.run(max_steps=kwargs.get("max_steps", 10)) for agent in agents])
-
-            if agent_state and agent_state.is_stop_requested():
-                # Stop
-                break
-            # 3. Summarize Search Result
-            query_result_dir = os.path.join(save_dir, "query_results")
-            os.makedirs(query_result_dir, exist_ok=True)
-            for i in range(len(query_tasks)):
-                query_result = query_results[i].final_result()
-                if not query_result:
-                    continue
-                querr_save_path = os.path.join(query_result_dir, f"{search_iteration}-{i}.md")
-                logger.info(f"save query: {query_tasks[i]} at {querr_save_path}")
-                with open(querr_save_path, "w", encoding="utf-8") as fw:
-                    fw.write(f"Query: {query_tasks[i]}\n")
-                    fw.write(query_result)
-                # split query result in case the content is too long
-                query_results_split = query_result.split("Extracted page content:")
-                for qi, query_result_ in enumerate(query_results_split):
-                    if not query_result_:
-                        continue
-                    else:
-                        # TODO: limit content lenght: 128k tokens, ~3 chars per token
-                        query_result_ = query_result_[:128000 * 3]
-                    history_infos_ = json.dumps(history_infos, indent=4)
-                    record_prompt = f"User Instruction:{task}. \nPrevious Recorded Information:\n {history_infos_}\n Current Search Iteration: {search_iteration}\n Current Search Plan:\n{query_plan}\n Current Search Query:\n {query_tasks[i]}\n Current Search Results: {query_result_}\n "
-                    record_messages.append(HumanMessage(content=record_prompt))
-                    ai_record_msg = llm.invoke(record_messages[:1] + record_messages[-1:])
-                    record_messages.append(ai_record_msg)
-                    if hasattr(ai_record_msg, "reasoning_content"):
-                        logger.info("🤯 Start Record Deep Thinking: ")
-                        logger.info(ai_record_msg.reasoning_content)
-                        logger.info("🤯 End Record Deep Thinking")
-                    record_content = ai_record_msg.content
-                    record_content = repair_json(record_content)
-                    new_record_infos = json.loads(record_content)
-                    history_infos.extend(new_record_infos)
-            if agent_state and agent_state.is_stop_requested():
-                # Stop
-                break
-
-        logger.info("\nFinish Searching, Start Generating Report...")
-
-        # 5. Report Generation in Markdown (or JSON if you prefer)
-        return await generate_final_report(task, history_infos, save_dir, llm)
-
-    except Exception as e:
-        logger.error(f"Deep research Error: {e}")
-        return await generate_final_report(task, history_infos, save_dir, llm, str(e))
-    finally:
-        if browser:
-            await browser.close()
-        if browser_context:
-            await browser_context.close()
-        logger.info("Browser closed.")
-
-
-async def generate_final_report(task, history_infos, save_dir, llm, error_msg=None):
-    """Generate report from collected information with error handling"""
-    try:
-        logger.info("\nAttempting to generate final report from collected data...")
-
-        writer_system_prompt = """
-        You are a **Deep Researcher** and a professional report writer tasked with creating polished, high-quality reports that fully meet the user's needs, based on the user's instructions and the relevant information provided. You will write the report using Markdown format, ensuring it is both informative and visually appealing.
-
-**Specific Instructions:**
-
-*   **Structure for Impact:** The report must have a clear, logical, and impactful structure. Begin with a compelling introduction that immediately grabs the reader's attention. Develop well-structured body paragraphs that flow smoothly and logically, and conclude with a concise and memorable conclusion that summarizes key takeaways and leaves a lasting impression.
-*   **Engaging and Vivid Language:** Employ precise, vivid, and descriptive language to make the report captivating and enjoyable to read. Use stylistic techniques to enhance engagement. Tailor your tone, vocabulary, and writing style to perfectly suit the subject matter and the intended audience to maximize impact and readability.
-*   **Accuracy, Credibility, and Citations:** Ensure that all information presented is meticulously accurate, rigorously truthful, and robustly supported by the available data. **Cite sources exclusively using bracketed sequential numbers within the text (e.g., [1], [2], etc.). If no references are used, omit citations entirely.** These numbers must correspond to a numbered list of references at the end of the report.
-*   **Publication-Ready Formatting:** Adhere strictly to Markdown formatting for excellent readability and a clean, highly professional visual appearance. Pay close attention to formatting details like headings, lists, emphasis, and spacing to optimize the visual presentation and reader experience. The report should be ready for immediate publication upon completion, requiring minimal to no further editing for style or format.
-*   **Conciseness and Clarity (Unless Specified Otherwise):** When the user does not provide a specific length, prioritize concise and to-the-point writing, maximizing information density while maintaining clarity.
-*   **Data-Driven Comparisons with Tables:**  **When appropriate and beneficial for enhancing clarity and impact, present data comparisons in well-structured Markdown tables. This is especially encouraged when dealing with numerical data or when a visual comparison can significantly improve the reader's understanding.**
-*   **Length Adherence:** When the user specifies a length constraint, meticulously stay within reasonable bounds of that specification, ensuring the content is appropriately scaled without sacrificing quality or completeness.
-*   **Comprehensive Instruction Following:** Pay meticulous attention to all details and nuances provided in the user instructions. Strive to fulfill every aspect of the user's request with the highest degree of accuracy and attention to detail, creating a report that not only meets but exceeds expectations for quality and professionalism.
-*   **Reference List Formatting:** The reference list at the end must be formatted as follows:  
-    `[1] Title (URL, if available)`
-    **Each reference must be separated by a blank line to ensure proper spacing.** For example:
-
-    ```
-    [1] Title 1 (URL1, if available)
-
-    [2] Title 2 (URL2, if available)
-    ```
-    **Furthermore, ensure that the reference list is free of duplicates. Each unique source should be listed only once, regardless of how many times it is cited in the text.**
-*   **ABSOLUTE FINAL OUTPUT RESTRICTION:**  **Your output must contain ONLY the finished, publication-ready Markdown report. Do not include ANY extraneous text, phrases, preambles, meta-commentary, or markdown code indicators (e.g., "```markdown```"). The report should begin directly with the title and introductory paragraph, and end directly after the conclusion and the reference list (if applicable).**  **Your response will be deemed a failure if this instruction is not followed precisely.**
-
-**Inputs:**
-
-1. **User Instruction:** The original instruction given by the user. This helps you determine what kind of information will be useful and how to structure your thinking.
-2. **Search Information:** Information gathered from the search queries.
+        # Construct the task prompt for BrowserUseAgent
+        # Instruct it to find specific info and return title/URL
+        bu_task_prompt = f"""
+        Research Task: {task_query}
+        Objective: Find relevant information answering the query.
+        Output Requirements: For each relevant piece of information found, please provide:
+        1. A concise summary of the information.
+        2. The title of the source page or document.
+        3. The URL of the source.
+        Focus on accuracy and relevance. Avoid irrelevant details.
         """
 
-        history_infos_ = json.dumps(history_infos, indent=4)
-        record_json_path = os.path.join(save_dir, "record_infos.json")
-        logger.info(f"save All recorded information at {record_json_path}")
-        with open(record_json_path, "w") as fw:
-            json.dump(history_infos, fw, indent=4)
-        report_prompt = f"User Instruction:{task} \n Search Information:\n {history_infos_}"
-        report_messages = [SystemMessage(content=writer_system_prompt),
-                           HumanMessage(content=report_prompt)]  # New context for report generation
-        ai_report_msg = llm.invoke(report_messages)
-        if hasattr(ai_report_msg, "reasoning_content"):
-            logger.info("🤯 Start Report Deep Thinking: ")
-            logger.info(ai_report_msg.reasoning_content)
-            logger.info("🤯 End Report Deep Thinking")
-        report_content = ai_report_msg.content
-        report_content = re.sub(r"^```\s*markdown\s*|^\s*```|```\s*$", "", report_content, flags=re.MULTILINE)
-        report_content = report_content.strip()
+        bu_agent_instance = BrowserUseAgent(
+            task=bu_task_prompt,
+            llm=llm,  # Use the passed LLM
+            browser=bu_browser,
+            browser_context=bu_browser_context,
+            controller=bu_controller,
+            use_vision=use_vision,
+        )
 
-        # Add error notification to the report
-        if error_msg:
-            report_content = f"## ⚠️ Research Incomplete - Partial Results\n" \
-                             f"**The research process was interrupted by an error:** {error_msg}\n\n" \
-                             f"{report_content}"
+        # Store instance for potential stop() call
+        task_key = f"{task_id}_{uuid.uuid4()}"  # Unique key for this run
+        _BROWSER_AGENT_INSTANCES[task_key] = bu_agent_instance
 
-        report_file_path = os.path.join(save_dir, "final_report.md")
-        with open(report_file_path, "w", encoding="utf-8") as f:
-            f.write(report_content)
-        logger.info(f"Save Report at: {report_file_path}")
-        return report_content, report_file_path
+        # --- Run with Stop Check ---
+        # BrowserUseAgent needs to internally check a stop signal or have a stop method.
+        # We simulate checking before starting and assume `run` might be interruptible
+        # or have its own stop mechanism we can trigger via bu_agent_instance.stop().
+        if stop_event.is_set():
+            logger.info(f"Browser task for '{task_query}' cancelled before start.")
+            return {"query": task_query, "result": None, "status": "cancelled"}
 
-    except Exception as report_error:
-        logger.error(f"Failed to generate partial report: {report_error}")
-        return f"Error generating report: {str(report_error)}", None
+        # The run needs to be awaitable and ideally accept a stop signal or have a .stop() method
+        # result = await bu_agent_instance.run(max_steps=max_steps) # Add max_steps if applicable
+        # Let's assume a simplified run for now
+        logger.info(f"Running BrowserUseAgent for: {task_query}")
+        result = await bu_agent_instance.run()  # Assuming run is the main method
+        logger.info(f"BrowserUseAgent finished for: {task_query}")
+
+        final_data = result.final_result()
+
+        if stop_event.is_set():
+            logger.info(f"Browser task for '{task_query}' stopped during execution.")
+            return {"query": task_query, "result": final_data, "status": "stopped"}
+        else:
+            logger.info(f"Browser result for '{task_query}': {final_data}")
+            return {"query": task_query, "result": final_data, "status": "completed"}
+
+    except Exception as e:
+        logger.error(f"Error during browser task for query '{task_query}': {e}", exc_info=True)
+        return {"query": task_query, "error": str(e), "status": "failed"}
+    finally:
+        if task_key in _BROWSER_AGENT_INSTANCES:
+            del _BROWSER_AGENT_INSTANCES[task_key]
+        if bu_browser_context:
+            try:
+                await bu_browser_context.close()
+                logger.info("Closed browser context.")
+            except Exception as e:
+                logger.error(f"Error closing browser context: {e}")
+        if bu_browser:
+            try:
+                await bu_browser.close()
+                logger.info("Closed browser.")
+            except Exception as e:
+                logger.error(f"Error closing browser: {e}")
+
+
+async def browser_search_tool_func(queries: List[str], task_id: str, llm: Any, browser_config: Dict[str, Any],
+                                   stop_event: threading.Event):
+    """
+    Tool function to run multiple browser searches in parallel (up to MAX_PARALLEL_BROWSERS).
+    """
+    if not BrowserUseAgent:
+        return [{"query": q, "error": "BrowserUseAgent components not available."} for q in queries]
+
+    results = []
+    # Use asyncio.Semaphore to limit concurrent browser instances
+    semaphore = asyncio.Semaphore(MAX_PARALLEL_BROWSERS)
+
+    async def task_wrapper(query):
+        async with semaphore:
+            if stop_event.is_set():
+                logger.info(f"Skipping browser task due to stop signal: {query}")
+                return {"query": query, "result": None, "status": "cancelled"}
+            # Pass necessary configs and the stop event
+            return await run_single_browser_task(query, task_id, llm, browser_config, stop_event)
+
+    tasks = [task_wrapper(query) for query in queries]
+    # Use asyncio.gather to run tasks concurrently
+    search_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results, handling potential exceptions returned by gather
+    for result in search_results:
+        if isinstance(result, Exception):
+            # Log the exception, but maybe return a specific error structure
+            logger.error(f"Browser task gather caught exception: {result}")
+            # Find which query failed if possible (difficult with gather exceptions directly)
+            results.append({"query": "unknown", "error": str(result), "status": "failed"})
+        else:
+            results.append(result)
+
+    return results
+
+
+# --- Langgraph State Definition ---
+
+class ResearchPlanItem(TypedDict):
+    step: int
+    task: str
+    status: str  # "pending", "completed", "failed"
+    queries: Optional[List[str]]  # Queries generated for this task
+    result_summary: Optional[str]  # Optional brief summary after execution
+
+
+class DeepResearchState(TypedDict):
+    task_id: str
+    topic: str
+    research_plan: List[ResearchPlanItem]
+    search_results: List[Dict[str, Any]]  # Stores results from browser_search_tool_func
+    # messages: Sequence[BaseMessage] # History for ReAct-like steps within nodes
+    llm: Any  # The LLM instance
+    tools: List[Tool]
+    output_dir: Path
+    browser_config: Dict[str, Any]
+    final_report: Optional[str]
+    current_step_index: int  # To track progress through the plan
+    stop_requested: bool  # Flag to signal termination
+    # Add other state variables as needed
+    error_message: Optional[str]  # To store errors
+
+
+# --- Langgraph Nodes ---
+
+def _load_previous_state(task_id: str, output_dir: str) -> Dict[str, Any]:
+    """Loads state from files if they exist."""
+    state_updates = {}
+    plan_file = os.path.join(output_dir, task_id, PLAN_FILENAME)
+    search_file = os.path.join(output_dir, task_id, SEARCH_INFO_FILENAME)
+
+    if os.path.exists(plan_file):
+        try:
+            with open(plan_file, 'r', encoding='utf-8') as f:
+                # Basic parsing, assumes markdown checklist format
+                plan = []
+                step = 1
+                for line in f:
+                    line = line.strip()
+                    if line.startswith(("[x]", "[ ]")):
+                        status = "completed" if line.startswith("[x]") else "pending"
+                        task = line[4:].strip()
+                        plan.append(
+                            ResearchPlanItem(step=step, task=task, status=status, queries=None, result_summary=None))
+                        step += 1
+                state_updates['research_plan'] = plan
+                # Determine next step index based on loaded plan
+                next_step = next((i for i, item in enumerate(plan) if item['status'] == 'pending'), len(plan))
+                state_updates['current_step_index'] = next_step
+                logger.info(f"Loaded research plan from {plan_file}, next step index: {next_step}")
+        except Exception as e:
+            logger.error(f"Failed to load or parse research plan {plan_file}: {e}")
+            state_updates['error_message'] = f"Failed to load research plan: {e}"
+
+    if os.path.exists(search_file):
+        try:
+            with open(search_file, 'r', encoding='utf-8') as f:
+                state_updates['search_results'] = json.load(f)
+                logger.info(f"Loaded search results from {search_file}")
+        except Exception as e:
+            logger.error(f"Failed to load search results {search_file}: {e}")
+            state_updates['error_message'] = f"Failed to load search results: {e}"
+            # Decide if this is fatal or if we can continue without old results
+
+    return state_updates
+
+
+def _save_plan_to_md(plan: List[ResearchPlanItem], output_dir: str):
+    """Saves the research plan to a markdown checklist file."""
+    plan_file = os.path.join(output_dir, PLAN_FILENAME)
+    try:
+        with open(plan_file, 'w', encoding='utf-8') as f:
+            f.write("# Research Plan\n\n")
+            for item in plan:
+                marker = "[x]" if item['status'] == 'completed' else "[ ]"
+                f.write(f"{marker} {item['task']}\n")
+        logger.info(f"Research plan saved to {plan_file}")
+    except Exception as e:
+        logger.error(f"Failed to save research plan to {plan_file}: {e}")
+
+
+def _save_search_results_to_json(results: List[Dict[str, Any]], output_dir: str):
+    """Appends or overwrites search results to a JSON file."""
+    search_file = os.path.join(output_dir, SEARCH_INFO_FILENAME)
+    try:
+        # Simple overwrite for now, could be append
+        with open(search_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        logger.info(f"Search results saved to {search_file}")
+    except Exception as e:
+        logger.error(f"Failed to save search results to {search_file}: {e}")
+
+
+def _save_report_to_md(report: str, output_dir: Path):
+    """Saves the final report to a markdown file."""
+    report_file = os.path.join(output_dir, REPORT_FILENAME)
+    try:
+        with open(report_file, 'w', encoding='utf-8') as f:
+            f.write(report)
+        logger.info(f"Final report saved to {report_file}")
+    except Exception as e:
+        logger.error(f"Failed to save final report to {report_file}: {e}")
+
+
+async def planning_node(state: DeepResearchState) -> Dict[str, Any]:
+    """Generates the initial research plan or refines it if resuming."""
+    logger.info("--- Entering Planning Node ---")
+    if state.get('stop_requested'):
+        logger.info("Stop requested, skipping planning.")
+        return {"stop_requested": True}
+
+    llm = state['llm']
+    topic = state['topic']
+    existing_plan = state.get('research_plan')
+    existing_results = state.get('search_results')
+    output_dir = state['output_dir']
+
+    if existing_plan and state.get('current_step_index', 0) > 0:
+        logger.info("Resuming with existing plan.")
+        # Maybe add logic here to let LLM review and potentially adjust the plan
+        # based on existing_results, but for now, we just use the loaded plan.
+        _save_plan_to_md(existing_plan, output_dir)  # Ensure it's saved initially
+        return {"research_plan": existing_plan}  # Return the loaded plan
+
+    logger.info(f"Generating new research plan for topic: {topic}")
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a meticulous research assistant. Your goal is to create a step-by-step research plan to thoroughly investigate a given topic.
+        The plan should consist of clear, actionable research tasks or questions. Each step should logically build towards a comprehensive understanding.
+        Format the output as a numbered list. Each item should represent a distinct research step or question.
+        Example:
+        1. Define the core concepts and terminology related to [Topic].
+        2. Identify the key historical developments of [Topic].
+        3. Analyze the current state-of-the-art and recent advancements in [Topic].
+        4. Investigate the major challenges and limitations associated with [Topic].
+        5. Explore the future trends and potential applications of [Topic].
+        6. Summarize the findings and draw conclusions.
+
+        Keep the plan focused and manageable. Aim for 5-10 detailed steps.
+        """),
+        ("human", f"Generate a research plan for the topic: {topic}")
+    ])
+
+    try:
+        response = await llm.ainvoke(prompt.format_prompt(topic=topic).to_messages())
+        plan_text = response.content
+
+        # Parse the numbered list into the plan structure
+        new_plan: List[ResearchPlanItem] = []
+        for i, line in enumerate(plan_text.strip().split('\n')):
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith(("*", "-"))):
+                # Simple parsing: remove number/bullet and space
+                task_text = line.split('.', 1)[-1].strip() if line[0].isdigit() else line[1:].strip()
+                if task_text:
+                    new_plan.append(ResearchPlanItem(
+                        step=i + 1,
+                        task=task_text,
+                        status="pending",
+                        queries=None,
+                        result_summary=None
+                    ))
+
+        if not new_plan:
+            logger.error("LLM failed to generate a valid plan structure.")
+            return {"error_message": "Failed to generate research plan structure."}
+
+        logger.info(f"Generated research plan with {len(new_plan)} steps.")
+        _save_plan_to_md(new_plan, output_dir)
+
+        return {
+            "research_plan": new_plan,
+            "current_step_index": 0,  # Start from the beginning
+            "search_results": [],  # Initialize search results
+        }
+
+    except Exception as e:
+        logger.error(f"Error during planning: {e}", exc_info=True)
+        return {"error_message": f"LLM Error during planning: {e}"}
+
+
+async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
+    """Executes the next step in the research plan using the browser tool."""
+    logger.info("--- Entering Research Execution Node ---")
+    if state.get('stop_requested'):
+        logger.info("Stop requested, skipping research execution.")
+        return {"stop_requested": True}
+
+    plan = state['research_plan']
+    current_index = state['current_step_index']
+    llm = state['llm']
+    browser_config = state['browser_config']
+    output_dir = state['output_dir']
+    task_id = state['task_id']
+    stop_event = _AGENT_STOP_FLAGS.get(task_id)
+
+    if not plan or current_index >= len(plan):
+        logger.info("Research plan complete or empty.")
+        return {}  # Signal to move to synthesis or end
+
+    current_step = plan[current_index]
+    if current_step['status'] == 'completed':
+        logger.info(f"Step {current_step['step']} already completed, skipping.")
+        return {"current_step_index": current_index + 1}  # Move to next step
+
+    logger.info(f"Executing research step {current_step['step']}: {current_step['task']}")
+
+    # 1. Generate Search Queries for the current task using LLM
+    query_gen_prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         f"You are an expert search query formulator. Given a research task, generate {MAX_PARALLEL_BROWSERS} distinct, effective search engine queries to find relevant information. Focus on diversity and different angles of the task. Output ONLY the queries, each on a new line."),
+        ("human", f"Research Task: {current_step['task']}\n\nGenerate search queries:")
+    ])
+
+    try:
+        response = await llm.ainvoke(query_gen_prompt.format_prompt().to_messages())
+        queries = [q.strip() for q in response.content.strip().split('\n') if q.strip()]
+        if not queries:
+            logger.warning(
+                f"LLM did not generate any search queries for task: {current_step['task']}. Using task itself as query.")
+            queries = [current_step['task']]
+        else:
+            queries = queries[:MAX_PARALLEL_BROWSERS]  # Limit to max parallel
+        logger.info(f"Generated queries: {queries}")
+        current_step['queries'] = queries  # Store generated queries in the plan item
+
+    except Exception as e:
+        logger.error(f"Failed to generate search queries: {e}. Using task as query.", exc_info=True)
+        queries = [current_step['task']]
+        current_step['queries'] = queries
+
+    # 2. Execute Searches using the Browser Tool
+    try:
+        search_results_list = await browser_search_tool_func(
+            queries=queries,
+            task_id=task_id,
+            llm=llm,
+            browser_config=browser_config,
+            stop_event=stop_event
+        )
+
+        # Check for stop signal *after* search execution attempt
+        if stop_event and stop_event.is_set():
+            logger.info("Stop requested during or after search execution.")
+            # Update plan partially if needed, or just signal stop
+            current_step['status'] = 'pending'  # Mark as not completed due to stop
+            _save_plan_to_md(plan, output_dir)
+            # Save any partial results gathered before stop
+            current_search_results = state.get('search_results', [])
+            current_search_results.extend([r for r in search_results_list if r.get('status') != 'cancelled'])
+            _save_search_results_to_json(current_search_results, output_dir)
+            return {"stop_requested": True, "search_results": current_search_results, "research_plan": plan}
+
+        # 3. Process Results and Update State
+        successful_results = [r for r in search_results_list if r.get('status') == 'completed' and r.get('result')]
+        failed_queries = [r['query'] for r in search_results_list if r.get('status') == 'failed']
+        # Combine results with existing ones
+        all_search_results = state.get('search_results', [])
+        all_search_results.extend(search_results_list)  # Add all results (incl. errors)
+
+        if failed_queries:
+            logger.warning(f"Some queries failed: {failed_queries}")
+            # Optionally add logic to retry failed queries
+
+        if successful_results:
+            # Optionally, summarize the findings for this step (could be another LLM call)
+            # current_step['result_summary'] = "Summary of findings..."
+            current_step['status'] = 'completed'
+            logger.info(f"Step {current_step['step']} completed successfully.")
+        else:
+            # Decide how to handle steps with no successful results
+            logger.warning(f"Step {current_step['step']} completed but yielded no successful results.")
+            current_step['status'] = 'failed'  # Or 'completed_no_results'
+
+        # Update the plan file on disk
+        _save_plan_to_md(plan, output_dir)
+        # Update the search results file on disk
+        _save_search_results_to_json(all_search_results, output_dir)
+
+        return {
+            "research_plan": plan,
+            "search_results": all_search_results,
+            "current_step_index": current_index + 1,
+            "error_message": None if not failed_queries else f"Failed queries: {failed_queries}"
+        }
+
+    except Exception as e:
+        logger.error(f"Error during research execution for step {current_step['step']}: {e}", exc_info=True)
+        current_step['status'] = 'failed'
+        _save_plan_to_md(plan, output_dir)
+        return {
+            "research_plan": plan,
+            "current_step_index": current_index + 1,  # Move to next step even if failed? Or retry? Let's move on.
+            "error_message": f"Execution Error on step {current_step['step']}: {e}"
+        }
+
+
+async def synthesis_node(state: DeepResearchState) -> Dict[str, Any]:
+    """Synthesizes the final report from the collected search results."""
+    logger.info("--- Entering Synthesis Node ---")
+    if state.get('stop_requested'):
+        logger.info("Stop requested, skipping synthesis.")
+        return {"stop_requested": True}
+
+    llm = state['llm']
+    topic = state['topic']
+    search_results = state.get('search_results', [])
+    output_dir = state['output_dir']
+    plan = state['research_plan']  # Include plan for context
+
+    if not search_results:
+        logger.warning("No search results found to synthesize report.")
+        report = f"# Research Report: {topic}\n\nNo information was gathered during the research process."
+        _save_report_to_md(report, output_dir)
+        return {"final_report": report}
+
+    logger.info(f"Synthesizing report from {len(search_results)} collected search result entries.")
+
+    # Prepare context for the LLM
+    # Format search results nicely, maybe group by query or original plan step
+    formatted_results = ""
+    references = {}
+    ref_count = 1
+    for i, result_entry in enumerate(search_results):
+        query = result_entry.get('query', 'Unknown Query')
+        status = result_entry.get('status', 'unknown')
+        result_data = result_entry.get('result')  # This should be the dict with summary, title, url
+        error = result_entry.get('error')
+
+        if status == 'completed' and result_data:
+            summary = result_data
+            formatted_results += f"### Finding from Query: \"{query}\"\n"
+            formatted_results += f"- **Summary:**\n{summary}\n"
+            formatted_results += "---\n"
+
+        elif status == 'failed':
+            formatted_results += f"### Failed Query: \"{query}\"\n"
+            formatted_results += f"- **Error:** {error}\n"
+            formatted_results += "---\n"
+        # Ignore cancelled/other statuses for the report content
+
+    # Prepare the research plan context
+    plan_summary = "\nResearch Plan Followed:\n"
+    for item in plan:
+        marker = "[x]" if item['status'] == 'completed' else "[?]" if item['status'] == 'failed' else "[ ]"
+        plan_summary += f"{marker} {item['task']}\n"
+
+    synthesis_prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a professional researcher tasked with writing a comprehensive and well-structured report based on collected findings.
+        The report should address the research topic thoroughly, synthesizing the information gathered from various sources.
+        Structure the report logically:
+        1.  **Introduction:** Briefly introduce the topic and the report's scope (mentioning the research plan followed is good).
+        2.  **Main Body:** Discuss the key findings, organizing them thematically or according to the research plan steps. Analyze, compare, and contrast information from different sources where applicable. **Crucially, cite your sources using bracketed numbers [X] corresponding to the reference list.**
+        3.  **Conclusion:** Summarize the main points and offer concluding thoughts or potential areas for further research.
+
+        Ensure the tone is objective, professional, and analytical. Base the report **strictly** on the provided findings. Do not add external knowledge. If findings are contradictory or incomplete, acknowledge this.
+        """),
+        ("human", f"""
+        **Research Topic:** {topic}
+
+        {plan_summary}
+
+        **Collected Findings:**
+        ```
+        {formatted_results}
+        ```
+
+        ```
+
+        Please generate the final research report in Markdown format based **only** on the information above. Ensure all claims derived from the findings are properly cited using the format [Reference_ID].
+        """)
+    ])
+
+    try:
+        response = await llm.ainvoke(synthesis_prompt.format_prompt(
+            topic=topic,
+            plan_summary=plan_summary,
+            formatted_results=formatted_results,
+            references=references
+        ).to_messages())
+        final_report_md = response.content
+
+        # Append the reference list automatically to the end of the generated markdown
+        if references:
+            report_references_section = "\n\n## References\n\n"
+            # Sort refs by ID for consistent output
+            sorted_refs = sorted(references.values(), key=lambda x: x['id'])
+            for ref in sorted_refs:
+                report_references_section += f"[{ref['id']}] {ref['title']} - {ref['url']}\n"
+            final_report_md += report_references_section
+
+        logger.info("Successfully synthesized the final report.")
+        _save_report_to_md(final_report_md, output_dir)
+        return {"final_report": final_report_md}
+
+    except Exception as e:
+        logger.error(f"Error during report synthesis: {e}", exc_info=True)
+        return {"error_message": f"LLM Error during synthesis: {e}"}
+
+
+# --- Langgraph Edges and Conditional Logic ---
+
+def should_continue(state: DeepResearchState) -> str:
+    """Determines the next step based on the current state."""
+    logger.info("--- Evaluating Condition: Should Continue? ---")
+    if state.get('stop_requested'):
+        logger.info("Stop requested, routing to END.")
+        return "end_run"  # Go to a dedicated end node for cleanup if needed
+    if state.get('error_message'):
+        logger.warning(f"Error detected: {state['error_message']}. Routing to END.")
+        # Decide if errors should halt execution or if it should try to synthesize anyway
+        return "end_run"  # Stop on error for now
+
+    plan = state.get('research_plan')
+    current_index = state.get('current_step_index', 0)
+
+    if not plan:
+        logger.warning("No research plan found, cannot continue execution. Routing to END.")
+        return "end_run"  # Should not happen if planning node ran correctly
+
+    # Check if there are pending steps in the plan
+    if current_index < len(plan):
+        logger.info(
+            f"Plan has pending steps (current index {current_index}/{len(plan)}). Routing to Research Execution.")
+        return "execute_research"
+    else:
+        logger.info("All plan steps processed. Routing to Synthesis.")
+        return "synthesize_report"
+
+
+# --- DeepSearchAgent Class ---
+
+class DeepSearchAgent:
+    def __init__(self, llm: Any, browser_config: Dict[str, Any], mcp_server_config: Optional[Dict[str, Any]] = None):
+        """
+        Initializes the DeepSearchAgent.
+
+        Args:
+            llm: The Langchain compatible language model instance.
+            browser_config: Configuration dictionary for the BrowserUseAgent tool.
+                            Example: {"headless": True, "window_width": 1280, ...}
+            mcp_server_config: Optional configuration for the MCP client.
+        """
+        self.llm = llm
+        self.browser_config = browser_config
+        self.mcp_server_config = mcp_server_config
+        self.mcp_client = None
+        self.graph = self._compile_graph()
+        self.current_task_id: Optional[str] = None
+        self.stop_event: Optional[threading.Event] = None
+        self.runner: Optional[asyncio.Task] = None  # To hold the asyncio task for run
+
+    async def _setup_tools(self) -> List[Tool]:
+        """Sets up the basic tools (File I/O) and optional MCP tools."""
+        tools = [WriteFileTool(), ReadFileTool(), ListDirectoryTool(), CopyFileTool(),
+                 MoveFileTool()]  # Basic file operations
+
+        # Add MCP tools if config is provided
+        if self.mcp_server_config:
+            try:
+                logger.info("Setting up MCP client and tools...")
+                self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
+                mcp_tools = self.mcp_client.get_tools()
+                logger.info(f"Loaded {len(mcp_tools)} MCP tools.")
+                tools.extend(mcp_tools)
+            except Exception as e:
+                logger.error(f"Failed to set up MCP tools: {e}", exc_info=True)
+        elif self.mcp_server_config:
+            logger.warning("MCP server config provided, but setup function unavailable.")
+
+        return tools
+
+    def _compile_graph(self) -> StateGraph:
+        """Compiles the Langgraph state machine."""
+        workflow = StateGraph(DeepResearchState)
+
+        # Add nodes
+        workflow.add_node("plan_research", planning_node)
+        workflow.add_node("execute_research", research_execution_node)
+        workflow.add_node("synthesize_report", synthesis_node)
+        workflow.add_node("end_run", lambda state: logger.info("--- Reached End Run Node ---") or {})  # Simple end node
+
+        # Define edges
+        workflow.set_entry_point("plan_research")
+
+        workflow.add_edge("plan_research", "execute_research")  # Always execute after planning
+
+        # Conditional edge after execution
+        workflow.add_conditional_edges(
+            "execute_research",
+            should_continue,
+            {
+                "execute_research": "execute_research",  # Loop back if more steps
+                "synthesize_report": "synthesize_report",  # Move to synthesis if done
+                "end_run": "end_run"  # End if stop requested or error
+            }
+        )
+
+        workflow.add_edge("synthesize_report", "end_run")  # End after synthesis
+
+        app = workflow.compile()
+        return app
+
+    async def run(self, topic: str, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Starts the deep research process (Async Generator Version).
+
+        Args:
+            topic: The research topic.
+            task_id: Optional existing task ID to resume. If None, a new ID is generated.
+
+        Yields:
+             Intermediate state updates or messages during execution.
+        """
+        if self.runner and not self.runner.done():
+            logger.warning("Agent is already running. Please stop the current task first.")
+            # Return an error status instead of yielding
+            return {"status": "error", "message": "Agent already running.", "task_id": self.current_task_id}
+
+        self.current_task_id = task_id if task_id else str(uuid.uuid4())
+        output_dir = os.path.join(TMP_DIR, self.current_task_id)
+        os.makedirs(output_dir, exist_ok=True)
+
+        logger.info(f"[AsyncGen] Starting research task ID: {self.current_task_id} for topic: '{topic}'")
+        logger.info(f"[AsyncGen] Output directory: {output_dir}")
+
+        self.stop_event = threading.Event()
+        _AGENT_STOP_FLAGS[self.current_task_id] = self.stop_event
+        agent_tools = await self._setup_tools()
+        initial_state: DeepResearchState = {
+            "task_id": self.current_task_id,
+            "topic": topic,
+            "research_plan": [],
+            "search_results": [],
+            "llm": self.llm,
+            "tools": agent_tools,
+            "output_dir": output_dir,
+            "browser_config": self.browser_config,
+            "final_report": None,
+            "current_step_index": 0,
+            "stop_requested": False,
+            "error_message": None,
+        }
+
+        loaded_state = {}
+        if task_id:
+            logger.info(f"Attempting to resume task {task_id}...")
+            loaded_state = _load_previous_state(task_id, output_dir)
+            initial_state.update(loaded_state)
+            if loaded_state.get("research_plan"):
+                logger.info(
+                    f"Resuming with {len(loaded_state['research_plan'])} plan steps and {len(loaded_state.get('search_results', []))} existing results.")
+                initial_state[
+                    "topic"] = topic  # Allow overriding topic even when resuming? Or use stored topic? Let's use new one.
+            else:
+                logger.warning(f"Resume requested for {task_id}, but no previous plan found. Starting fresh.")
+                initial_state["current_step_index"] = 0
+
+        # --- Execute Graph using ainvoke ---
+        final_state = None
+        status = "unknown"
+        message = None
+        try:
+            logger.info(f"Invoking graph execution for task {self.current_task_id}...")
+            self.runner = asyncio.create_task(self.graph.ainvoke(initial_state))
+            final_state = await self.runner
+            logger.info(f"Graph execution finished for task {self.current_task_id}.")
+
+            # Determine status based on final state
+            if self.stop_event and self.stop_event.is_set():
+                status = "stopped"
+                message = "Research process was stopped by request."
+                logger.info(message)
+            elif final_state and final_state.get("error_message"):
+                status = "error"
+                message = final_state["error_message"]
+                logger.error(f"Graph execution completed with error: {message}")
+            elif final_state and final_state.get("final_report"):
+                status = "completed"
+                message = "Research process completed successfully."
+                logger.info(message)
+            else:
+                # If it ends without error/report (e.g., empty plan, stopped before synthesis)
+                status = "finished_incomplete"
+                message = "Research process finished, but may be incomplete (no final report generated)."
+                logger.warning(message)
+
+        except asyncio.CancelledError:
+            status = "cancelled"
+            message = f"Agent run task cancelled for {self.current_task_id}."
+            logger.info(message)
+            # final_state will remain None or the state before cancellation if checkpointing was used
+        except Exception as e:
+            status = "error"
+            message = f"Unhandled error during graph execution for {self.current_task_id}: {e}"
+            logger.error(message, exc_info=True)
+            # final_state will remain None or the state before the error
+        finally:
+            logger.info(f"Cleaning up resources for task {self.current_task_id}")
+            task_id_to_clean = self.current_task_id  # Store before potentially clearing
+            if task_id_to_clean in _AGENT_STOP_FLAGS:
+                del _AGENT_STOP_FLAGS[task_id_to_clean]
+            # Stop any potentially lingering browser agents for this task
+            await self._stop_lingering_browsers(task_id_to_clean)
+            # Ensure the instance tracker is clean (should be handled by tool's finally block)
+            lingering_keys = [k for k in _BROWSER_AGENT_INSTANCES if k.startswith(f"{task_id_to_clean}_")]
+            if lingering_keys:
+                logger.warning(
+                    f"{len(lingering_keys)} lingering browser instances found in tracker for task {task_id_to_clean} after cleanup attempt.")
+                # Force clear them from the tracker dict
+                for key in lingering_keys:
+                    del _BROWSER_AGENT_INSTANCES[key]
+
+            self.stop_event = None
+            self.current_task_id = None
+            self.runner = None  # Mark runner as finished
+            if self.mcp_client:
+                await self.mcp_client.__aexit__(None, None, None)
+
+            # Return a result dictionary including the status and the final state if available
+            return {
+                "status": status,
+                "message": message,
+                "task_id": task_id_to_clean,  # Use the stored task_id
+                "final_state": final_state if final_state else {}  # Return the final state dict
+            }
+
+    async def _stop_lingering_browsers(self, task_id):
+        """Attempts to stop any BrowserUseAgent instances associated with the task_id."""
+        keys_to_stop = [key for key in _BROWSER_AGENT_INSTANCES if key.startswith(f"{task_id}_")]
+        if not keys_to_stop:
+            return
+
+        logger.warning(
+            f"Found {len(keys_to_stop)} potentially lingering browser agents for task {task_id}. Attempting stop...")
+        for key in keys_to_stop:
+            agent_instance = _BROWSER_AGENT_INSTANCES.get(key)
+            if agent_instance and hasattr(agent_instance, 'stop'):
+                try:
+                    # Assuming BU agent has an async stop method
+                    await agent_instance.stop()
+                    logger.info(f"Called stop() on browser agent instance {key}")
+                except Exception as e:
+                    logger.error(f"Error calling stop() on browser agent instance {key}: {e}")
+            # Instance should be removed by the finally block in run_single_browser_task
+            # but we ensure removal here too.
+            if key in _BROWSER_AGENT_INSTANCES:
+                del _BROWSER_AGENT_INSTANCES[key]
+
+    def stop(self):
+        """Signals the currently running agent task to stop."""
+        if not self.current_task_id or not self.stop_event:
+            logger.info("No agent task is currently running.")
+            return
+
+        logger.info(f"Stop requested for task ID: {self.current_task_id}")
+        self.stop_event.set()  # Signal the stop event
+
+        # Additionally, try to stop the browser agents directly
+        # Need to run this async in the background or manage event loops carefully
+        async def do_stop_browsers():
+            await self._stop_lingering_browsers(self.current_task_id)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(do_stop_browsers())
+        except RuntimeError:  # No running loop in current thread
+            asyncio.run(do_stop_browsers())

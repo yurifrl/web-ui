@@ -32,6 +32,7 @@ async def test_mcp_client():
     }
 
     mcp_tools, mcp_client = await setup_mcp_client_and_tools(test_server_config)
+
     for tool in mcp_tools:
         tool_param_model = create_tool_param_model(tool)
         print(tool.name)

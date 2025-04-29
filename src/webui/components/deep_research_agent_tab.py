@@ -5,7 +5,7 @@ from src.webui.webui_manager import WebuiManager
 from src.utils import config
 
 
-def create_deep_research_agent_tab(webui_manager: WebuiManager) -> dict[str, Component]:
+def create_deep_research_agent_tab(webui_manager: WebuiManager):
     """
     Creates a deep research agent tab
     """

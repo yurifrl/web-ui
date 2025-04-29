@@ -5,7 +5,7 @@ from src.webui.webui_manager import WebuiManager
 from src.utils import config
 
 
-def create_load_save_config_tab(webui_manager: WebuiManager) -> dict[str, Component]:
+def create_load_save_config_tab(webui_manager: WebuiManager):
     """
     Creates a load and save config tab.
     """
@@ -13,7 +13,7 @@ def create_load_save_config_tab(webui_manager: WebuiManager) -> dict[str, Compon
     tab_components = {}
 
     config_file = gr.File(
-        label="Load UI Settings from Config File",
+        label="Load UI Settings from json",
         file_types=[".json"],
         interactive=True
     )
