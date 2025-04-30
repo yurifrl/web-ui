@@ -24,13 +24,13 @@ def update_model_dropdown(llm_provider):
         return gr.Dropdown(choices=[], value="", interactive=True, allow_custom_value=True)
 
 
-def update_mcp_server(mcp_file: str, webui_manager: WebuiManager):
+async def update_mcp_server(mcp_file: str, webui_manager: WebuiManager):
     """
     Update the MCP server.
     """
     if hasattr(webui_manager, "bu_controller") and webui_manager.bu_controller:
         logger.warning("⚠️ Close controller because mcp file has changed!")
-        webui_manager.bu_controller.close_mcp_client()
+        await webui_manager.bu_controller.close_mcp_client()
         webui_manager.bu_controller = None
 
     if not mcp_file or not os.path.exists(mcp_file) or not mcp_file.endswith('.json'):
@@ -257,8 +257,13 @@ def create_agent_settings_tab(webui_manager: WebuiManager):
         outputs=[planner_llm_model_name]
     )
 
+    async def update_wrapper(mcp_file):
+        """Wrapper for handle_pause_resume."""
+        update_dict = await update_mcp_server(mcp_file, webui_manager)
+        yield update_dict
+
     mcp_json_file.change(
-        partial(update_mcp_server, webui_manager=webui_manager),
+        update_wrapper,
         inputs=[mcp_json_file],
         outputs=[mcp_server_config, mcp_server_config]
     )

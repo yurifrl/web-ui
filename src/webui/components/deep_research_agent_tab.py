@@ -349,13 +349,13 @@ async def stop_deep_research(webui_manager: WebuiManager) -> Dict[Component, Any
     return final_update
 
 
-def update_mcp_server(mcp_file: str, webui_manager: WebuiManager):
+async def update_mcp_server(mcp_file: str, webui_manager: WebuiManager):
     """
     Update the MCP server.
     """
     if hasattr(webui_manager, "dr_agent") and webui_manager.dr_agent:
         logger.warning("⚠️ Close controller because mcp file has changed!")
-        webui_manager.dr_agent.close_mcp_client()
+        await webui_manager.dr_agent.close_mcp_client()
 
     if not mcp_file or not os.path.exists(mcp_file) or not mcp_file.endswith('.json'):
         logger.warning(f"{mcp_file} is not a valid MCP file.")
@@ -413,8 +413,14 @@ def create_deep_research_agent_tab(webui_manager: WebuiManager):
     )
     webui_manager.add_components("deep_research_agent", tab_components)
     webui_manager.init_deep_research_agent()
+
+    async def update_wrapper(mcp_file):
+        """Wrapper for handle_pause_resume."""
+        update_dict = await update_mcp_server(mcp_file, webui_manager)
+        yield update_dict
+
     mcp_json_file.change(
-        partial(update_mcp_server, webui_manager=webui_manager),
+        update_wrapper,
         inputs=[mcp_json_file],
         outputs=[mcp_server_config, mcp_server_config]
     )
