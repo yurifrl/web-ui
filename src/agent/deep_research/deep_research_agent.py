@@ -40,6 +40,7 @@ PLAN_FILENAME = "research_plan.md"
 SEARCH_INFO_FILENAME = "search_info.json"
 
 _AGENT_STOP_FLAGS = {}
+_BROWSER_AGENT_INSTANCES = {}
 
 
 async def run_single_browser_task(
@@ -129,6 +130,7 @@ async def run_single_browser_task(
 
         # Store instance for potential stop() call
         task_key = f"{task_id}_{uuid.uuid4()}"
+        _BROWSER_AGENT_INSTANCES[task_key] = bu_agent_instance
 
         # --- Run with Stop Check ---
         # BrowserUseAgent needs to internally check a stop signal or have a stop method.
@@ -172,6 +174,9 @@ async def run_single_browser_task(
                 logger.info("Closed browser.")
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
+
+        if task_key in _BROWSER_AGENT_INSTANCES:
+            del _BROWSER_AGENT_INSTANCES[task_key]
 
 
 class BrowserSearchInput(BaseModel):
@@ -257,7 +262,7 @@ def create_browser_search_tool(
         name="parallel_browser_search",
         description=f"""Use this tool to actively search the web for information related to a specific research task or question.
 It runs up to {max_parallel_browsers} searches in parallel using a browser agent for better results than simple scraping.
-Provide a list of distinct search queries that are likely to yield relevant information.""",
+Provide a list of distinct search queries(up to {max_parallel_browsers}) that are likely to yield relevant information.""",
         args_schema=BrowserSearchInput,
     )
 
@@ -296,9 +301,8 @@ class DeepResearchState(TypedDict):
 def _load_previous_state(task_id: str, output_dir: str) -> Dict[str, Any]:
     """Loads state from files if they exist."""
     state_updates = {}
-    plan_file = os.path.join(output_dir, task_id, PLAN_FILENAME)
-    search_file = os.path.join(output_dir, task_id, SEARCH_INFO_FILENAME)
-
+    plan_file = os.path.join(output_dir, PLAN_FILENAME)
+    search_file = os.path.join(output_dir, SEARCH_INFO_FILENAME)
     if os.path.exists(plan_file):
         try:
             with open(plan_file, 'r', encoding='utf-8') as f:
@@ -307,9 +311,9 @@ def _load_previous_state(task_id: str, output_dir: str) -> Dict[str, Any]:
                 step = 1
                 for line in f:
                     line = line.strip()
-                    if line.startswith(("[x]", "[ ]")):
-                        status = "completed" if line.startswith("[x]") else "pending"
-                        task = line[4:].strip()
+                    if line.startswith(("- [x]", "- [ ]")):
+                        status = "completed" if line.startswith("- [x]") else "pending"
+                        task = line[5:].strip()
                         plan.append(
                             ResearchPlanItem(step=step, task=task, status=status, queries=None, result_summary=None))
                         step += 1
@@ -321,7 +325,6 @@ def _load_previous_state(task_id: str, output_dir: str) -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"Failed to load or parse research plan {plan_file}: {e}")
             state_updates['error_message'] = f"Failed to load research plan: {e}"
-
     if os.path.exists(search_file):
         try:
             with open(search_file, 'r', encoding='utf-8') as f:
@@ -342,7 +345,7 @@ def _save_plan_to_md(plan: List[ResearchPlanItem], output_dir: str):
         with open(plan_file, 'w', encoding='utf-8') as f:
             f.write("# Research Plan\n\n")
             for item in plan:
-                marker = "[x]" if item['status'] == 'completed' else "[ ]"
+                marker = "- [x]" if item['status'] == 'completed' else "- [ ]"
                 f.write(f"{marker} {item['task']}\n")
         logger.info(f"Research plan saved to {plan_file}")
     except Exception as e:
@@ -545,8 +548,6 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
                 stop_event = _AGENT_STOP_FLAGS.get(task_id)
                 if stop_event and stop_event.is_set():
                     logger.info(f"Stop requested before executing tool: {tool_name}")
-                    # How to report this back? Maybe skip execution, return special state?
-                    # Let's update state and return stop_requested = True
                     current_step['status'] = 'pending'  # Not completed due to stop
                     _save_plan_to_md(plan, output_dir)
                     return {"stop_requested": True, "research_plan": plan}
@@ -668,7 +669,8 @@ async def synthesis_node(state: DeepResearchState) -> Dict[str, Any]:
     # Prepare the research plan context
     plan_summary = "\nResearch Plan Followed:\n"
     for item in plan:
-        marker = "[x]" if item['status'] == 'completed' else "[?]" if item['status'] == 'failed' else "[ ]"
+        marker = "- [x]" if item['status'] == 'completed' else "- [ ] (Failed)" if item[
+                                                                                       'status'] == 'failed' else "- [ ]"
         plan_summary += f"{marker} {item['task']}\n"
 
     synthesis_prompt = ChatPromptTemplate.from_messages([
@@ -745,7 +747,7 @@ def should_continue(state: DeepResearchState) -> str:
         return "end_run"  # Should not happen if planning node ran correctly
 
     # Check if there are pending steps in the plan
-    if current_index < 2:
+    if current_index < len(plan):
         logger.info(
             f"Plan has pending steps (current index {current_index}/{len(plan)}). Routing to Research Execution.")
         return "execute_research"
@@ -956,7 +958,25 @@ class DeepResearchAgent:
                 "final_state": final_state if final_state else {}  # Return the final state dict
             }
 
-    def stop(self):
+    async def _stop_lingering_browsers(self, task_id):
+        """Attempts to stop any BrowserUseAgent instances associated with the task_id."""
+        keys_to_stop = [key for key in _BROWSER_AGENT_INSTANCES if key.startswith(f"{task_id}_")]
+        if not keys_to_stop:
+            return
+
+        logger.warning(
+            f"Found {len(keys_to_stop)} potentially lingering browser agents for task {task_id}. Attempting stop...")
+        for key in keys_to_stop:
+            agent_instance = _BROWSER_AGENT_INSTANCES.get(key)
+            try:
+                if agent_instance:
+                    # Assuming BU agent has an async stop method
+                    await agent_instance.stop()
+                    logger.info(f"Called stop() on browser agent instance {key}")
+            except Exception as e:
+                logger.error(f"Error calling stop() on browser agent instance {key}: {e}")
+
+    async def stop(self):
         """Signals the currently running agent task to stop."""
         if not self.current_task_id or not self.stop_event:
             logger.info("No agent task is currently running.")
@@ -965,6 +985,7 @@ class DeepResearchAgent:
         logger.info(f"Stop requested for task ID: {self.current_task_id}")
         self.stop_event.set()  # Signal the stop event
         self.stopped = True
+        await self._stop_lingering_browsers(self.current_task_id)
 
     def close(self):
         self.stopped = False

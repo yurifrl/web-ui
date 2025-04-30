@@ -338,17 +338,15 @@ async def test_deep_research_agent():
     from src.agent.deep_research.deep_research_agent import DeepResearchAgent, PLAN_FILENAME, REPORT_FILENAME
     from src.utils import llm_provider
 
-    # llm = llm_provider.get_llm_model(
-    #     provider="azure_openai",
-    #     model_name="gpt-4o",
-    #     temperature=0.5,
-    #     base_url=os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-    #     api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
-    # )
-
     llm = llm_provider.get_llm_model(
-        provider="bedrock",
+        provider="openai",
+        model_name="gpt-4o",
+        temperature=0.5
     )
+
+    # llm = llm_provider.get_llm_model(
+    #     provider="bedrock",
+    # )
 
     mcp_server_config = {
         "mcpServers": {
@@ -364,9 +362,8 @@ async def test_deep_research_agent():
 
     browser_config = {"headless": False, "window_width": 1280, "window_height": 1100, "use_own_browser": False}
     agent = DeepResearchAgent(llm=llm, browser_config=browser_config, mcp_server_config=mcp_server_config)
-
     research_topic = "Impact of Microplastics on Marine Ecosystems"
-    task_id_to_resume = None  # Set this to resume a previous task ID
+    task_id_to_resume = "815460fb-337a-4850-8fa4-a5f2db301a89"  # Set this to resume a previous task ID
 
     print(f"Starting research on: {research_topic}")
 
@@ -374,8 +371,9 @@ async def test_deep_research_agent():
         # Call run and wait for the final result dictionary
         result = await agent.run(research_topic,
                                  task_id=task_id_to_resume,
-                                 save_dir="./tmp/downloads",
-                                 max_parallel_browsers=1)
+                                 save_dir="./tmp/deep_research",
+                                 max_parallel_browsers=1,
+                                 )
 
         print("\n--- Research Process Ended ---")
         print(f"Status: {result.get('status')}")
