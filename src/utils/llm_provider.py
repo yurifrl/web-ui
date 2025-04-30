@@ -46,6 +46,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from langchain_ibm import ChatWatsonx
+from langchain_aws import ChatBedrock
+from pydantic import SecretStr
 
 from src.utils import config
 
@@ -154,7 +156,7 @@ def get_llm_model(provider: str, **kwargs):
     :param kwargs:
     :return:
     """
-    if provider not in ["ollama"]:
+    if provider not in ["ollama", "bedrock"]:
         env_var = f"{provider.upper()}_API_KEY"
         api_key = kwargs.get("api_key", "") or os.getenv(env_var, "")
         if not api_key:
@@ -262,6 +264,23 @@ def get_llm_model(provider: str, **kwargs):
             api_version=api_version,
             azure_endpoint=base_url,
             api_key=api_key,
+        )
+    elif provider == "bedrock":
+        if not kwargs.get("base_url", ""):
+            access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
+        else:
+            access_key_id = kwargs.get("base_url")
+
+        if not kwargs.get("api_key", ""):
+            api_key = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+        else:
+            api_key = kwargs.get("api_key")
+        return ChatBedrock(
+            model=kwargs.get("model_name", 'anthropic.claude-3-5-sonnet-20241022-v2:0'),
+            region=kwargs.get("bedrock_region", 'us-west-2'),  # with higher quota
+            aws_access_key_id=SecretStr(access_key_id),
+            aws_secret_access_key=SecretStr(api_key),
+            temperature=kwargs.get("temperature", 0.0),
         )
     elif provider == "alibaba":
         if not kwargs.get("base_url", ""):

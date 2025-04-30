@@ -35,15 +35,11 @@ from src.utils.mcp_client import setup_mcp_client_and_tools
 logger = logging.getLogger(__name__)
 
 # Constants
-TMP_DIR = Path("./tmp/deep_research")
-os.makedirs(TMP_DIR, exist_ok=True)
 REPORT_FILENAME = "report.md"
 PLAN_FILENAME = "research_plan.md"
 SEARCH_INFO_FILENAME = "search_info.json"
-MAX_PARALLEL_BROWSERS = 1
 
 _AGENT_STOP_FLAGS = {}
-_BROWSER_AGENT_INSTANCES = {}  # To store running browser agents for stopping
 
 
 async def run_single_browser_task(
@@ -119,6 +115,7 @@ async def run_single_browser_task(
         2. The title of the source page or document.
         3. The URL of the source.
         Focus on accuracy and relevance. Avoid irrelevant details.
+        PDF cannot directly extract _content, please try to download first, then using read_file, if you can't save or read, please try other methods.
         """
 
         bu_agent_instance = BrowserUseAgent(
@@ -131,8 +128,7 @@ async def run_single_browser_task(
         )
 
         # Store instance for potential stop() call
-        task_key = f"{task_id}_{uuid.uuid4()}"  # Unique key for this run
-        _BROWSER_AGENT_INSTANCES[task_key] = bu_agent_instance
+        task_key = f"{task_id}_{uuid.uuid4()}"
 
         # --- Run with Stop Check ---
         # BrowserUseAgent needs to internally check a stop signal or have a stop method.
@@ -162,17 +158,17 @@ async def run_single_browser_task(
         logger.error(f"Error during browser task for query '{task_query}': {e}", exc_info=True)
         return {"query": task_query, "error": str(e), "status": "failed"}
     finally:
-        if task_key in _BROWSER_AGENT_INSTANCES:
-            del _BROWSER_AGENT_INSTANCES[task_key]
         if bu_browser_context:
             try:
                 await bu_browser_context.close()
+                bu_browser_context = None
                 logger.info("Closed browser context.")
             except Exception as e:
                 logger.error(f"Error closing browser context: {e}")
         if bu_browser:
             try:
                 await bu_browser.close()
+                bu_browser = None
                 logger.info("Closed browser.")
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
@@ -180,15 +176,16 @@ async def run_single_browser_task(
 
 class BrowserSearchInput(BaseModel):
     queries: List[str] = Field(
-        description=f"List of distinct search queries (max {MAX_PARALLEL_BROWSERS}) to find information relevant to the research task.")
+        description=f"List of distinct search queries to find information relevant to the research task.")
 
 
 async def _run_browser_search_tool(
         queries: List[str],
         task_id: str,  # Injected dependency
         llm: Any,  # Injected dependency
-        browser_config: Dict[str, Any],  # Injected dependency
-        stop_event: threading.Event  # Injected dependency
+        browser_config: Dict[str, Any],
+        stop_event: threading.Event,
+        max_parallel_browsers: int = 1
 ) -> List[Dict[str, Any]]:
     """
     Internal function to execute parallel browser searches based on LLM-provided queries.
@@ -196,11 +193,11 @@ async def _run_browser_search_tool(
     """
 
     # Limit queries just in case LLM ignores the description
-    queries = queries[:MAX_PARALLEL_BROWSERS]
+    queries = queries[:max_parallel_browsers]
     logger.info(f"[Browser Tool {task_id}] Running search for {len(queries)} queries: {queries}")
 
     results = []
-    semaphore = asyncio.Semaphore(MAX_PARALLEL_BROWSERS)
+    semaphore = asyncio.Semaphore(max_parallel_browsers)
 
     async def task_wrapper(query):
         async with semaphore:
@@ -240,7 +237,8 @@ def create_browser_search_tool(
         llm: Any,
         browser_config: Dict[str, Any],
         task_id: str,
-        stop_event: threading.Event
+        stop_event: threading.Event,
+        max_parallel_browsers: int = 1,
 ) -> StructuredTool:
     """Factory function to create the browser search tool with necessary dependencies."""
     # Use partial to bind the dependencies that aren't part of the LLM call arguments
@@ -251,15 +249,15 @@ def create_browser_search_tool(
         llm=llm,
         browser_config=browser_config,
         stop_event=stop_event,
+        max_parallel_browsers=max_parallel_browsers
     )
 
     return StructuredTool.from_function(
         coroutine=bound_tool_func,
         name="parallel_browser_search",
         description=f"""Use this tool to actively search the web for information related to a specific research task or question.
-It runs up to {MAX_PARALLEL_BROWSERS} searches in parallel using a browser agent for better results than simple scraping.
-Provide a list of distinct search queries that are likely to yield relevant information.
-The tool returns a list of results, each containing the original query, the status (completed, failed, stopped), and the summarized information found (or an error message).""",
+It runs up to {max_parallel_browsers} searches in parallel using a browser agent for better results than simple scraping.
+Provide a list of distinct search queries that are likely to yield relevant information.""",
         args_schema=BrowserSearchInput,
     )
 
@@ -747,7 +745,7 @@ def should_continue(state: DeepResearchState) -> str:
         return "end_run"  # Should not happen if planning node ran correctly
 
     # Check if there are pending steps in the plan
-    if current_index < len(plan):
+    if current_index < 2:
         logger.info(
             f"Plan has pending steps (current index {current_index}/{len(plan)}). Routing to Research Execution.")
         return "execute_research"
@@ -758,7 +756,7 @@ def should_continue(state: DeepResearchState) -> str:
 
 # --- DeepSearchAgent Class ---
 
-class DeepSearchAgent:
+class DeepResearchAgent:
     def __init__(self, llm: Any, browser_config: Dict[str, Any], mcp_server_config: Optional[Dict[str, Any]] = None):
         """
         Initializes the DeepSearchAgent.
@@ -773,28 +771,30 @@ class DeepSearchAgent:
         self.browser_config = browser_config
         self.mcp_server_config = mcp_server_config
         self.mcp_client = None
+        self.stopped = False
         self.graph = self._compile_graph()
         self.current_task_id: Optional[str] = None
         self.stop_event: Optional[threading.Event] = None
         self.runner: Optional[asyncio.Task] = None  # To hold the asyncio task for run
 
-    async def _setup_tools(self, task_id: str, stop_event: threading.Event) -> List[Tool]:
+    async def _setup_tools(self, task_id: str, stop_event: threading.Event, max_parallel_browsers: int = 1) -> List[
+        Tool]:
         """Sets up the basic tools (File I/O) and optional MCP tools."""
         tools = [WriteFileTool(), ReadFileTool(), ListDirectoryTool()]  # Basic file operations
         browser_use_tool = create_browser_search_tool(
             llm=self.llm,
             browser_config=self.browser_config,
             task_id=task_id,
-            stop_event=stop_event
+            stop_event=stop_event,
+            max_parallel_browsers=max_parallel_browsers
         )
         tools += [browser_use_tool]
         # Add MCP tools if config is provided
         if self.mcp_server_config:
             try:
                 logger.info("Setting up MCP client and tools...")
-                if self.mcp_client:
-                    await self.mcp_client.__aexit__(None, None, None)
-                self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
+                if not self.mcp_client:
+                    self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
                 mcp_tools = self.mcp_client.get_tools()
                 logger.info(f"Loaded {len(mcp_tools)} MCP tools.")
                 tools.extend(mcp_tools)
@@ -802,8 +802,13 @@ class DeepSearchAgent:
                 logger.error(f"Failed to set up MCP tools: {e}", exc_info=True)
         elif self.mcp_server_config:
             logger.warning("MCP server config provided, but setup function unavailable.")
+        tools_map = {tool.name: tool for tool in tools}
+        return tools_map.values()
 
-        return tools
+    async def close_mcp_client(self):
+        if self.mcp_client:
+            await self.mcp_client.__aexit__(None, None, None)
+            self.mcp_client = None
 
     def _compile_graph(self) -> StateGraph:
         """Compiles the Langgraph state machine."""
@@ -836,7 +841,9 @@ class DeepSearchAgent:
         app = workflow.compile()
         return app
 
-    async def run(self, topic: str, task_id: Optional[str] = None) -> Dict[str, Any]:
+    async def run(self, topic: str, task_id: Optional[str] = None, save_dir: str = "./tmp/deep_research",
+                  max_parallel_browsers: int = 1) -> Dict[
+        str, Any]:
         """
         Starts the deep research process (Async Generator Version).
 
@@ -853,7 +860,7 @@ class DeepSearchAgent:
             return {"status": "error", "message": "Agent already running.", "task_id": self.current_task_id}
 
         self.current_task_id = task_id if task_id else str(uuid.uuid4())
-        output_dir = os.path.join(TMP_DIR, self.current_task_id)
+        output_dir = os.path.join(save_dir, self.current_task_id)
         os.makedirs(output_dir, exist_ok=True)
 
         logger.info(f"[AsyncGen] Starting research task ID: {self.current_task_id} for topic: '{topic}'")
@@ -861,7 +868,7 @@ class DeepSearchAgent:
 
         self.stop_event = threading.Event()
         _AGENT_STOP_FLAGS[self.current_task_id] = self.stop_event
-        agent_tools = await self._setup_tools(self.current_task_id, self.stop_event)
+        agent_tools = await self._setup_tools(self.current_task_id, self.stop_event, max_parallel_browsers)
         initial_state: DeepResearchState = {
             "task_id": self.current_task_id,
             "topic": topic,
@@ -933,19 +940,7 @@ class DeepSearchAgent:
             # final_state will remain None or the state before the error
         finally:
             logger.info(f"Cleaning up resources for task {self.current_task_id}")
-            task_id_to_clean = self.current_task_id  # Store before potentially clearing
-            if task_id_to_clean in _AGENT_STOP_FLAGS:
-                del _AGENT_STOP_FLAGS[task_id_to_clean]
-            # Stop any potentially lingering browser agents for this task
-            await self._stop_lingering_browsers(task_id_to_clean)
-            # Ensure the instance tracker is clean (should be handled by tool's finally block)
-            lingering_keys = [k for k in _BROWSER_AGENT_INSTANCES if k.startswith(f"{task_id_to_clean}_")]
-            if lingering_keys:
-                logger.warning(
-                    f"{len(lingering_keys)} lingering browser instances found in tracker for task {task_id_to_clean} after cleanup attempt.")
-                # Force clear them from the tracker dict
-                for key in lingering_keys:
-                    del _BROWSER_AGENT_INSTANCES[key]
+            task_id_to_clean = self.current_task_id
 
             self.stop_event = None
             self.current_task_id = None
@@ -961,28 +956,6 @@ class DeepSearchAgent:
                 "final_state": final_state if final_state else {}  # Return the final state dict
             }
 
-    async def _stop_lingering_browsers(self, task_id):
-        """Attempts to stop any BrowserUseAgent instances associated with the task_id."""
-        keys_to_stop = [key for key in _BROWSER_AGENT_INSTANCES if key.startswith(f"{task_id}_")]
-        if not keys_to_stop:
-            return
-
-        logger.warning(
-            f"Found {len(keys_to_stop)} potentially lingering browser agents for task {task_id}. Attempting stop...")
-        for key in keys_to_stop:
-            agent_instance = _BROWSER_AGENT_INSTANCES.get(key)
-            if agent_instance and hasattr(agent_instance, 'stop'):
-                try:
-                    # Assuming BU agent has an async stop method
-                    await agent_instance.stop()
-                    logger.info(f"Called stop() on browser agent instance {key}")
-                except Exception as e:
-                    logger.error(f"Error calling stop() on browser agent instance {key}: {e}")
-            # Instance should be removed by the finally block in run_single_browser_task
-            # but we ensure removal here too.
-            if key in _BROWSER_AGENT_INSTANCES:
-                del _BROWSER_AGENT_INSTANCES[key]
-
     def stop(self):
         """Signals the currently running agent task to stop."""
         if not self.current_task_id or not self.stop_event:
@@ -991,14 +964,7 @@ class DeepSearchAgent:
 
         logger.info(f"Stop requested for task ID: {self.current_task_id}")
         self.stop_event.set()  # Signal the stop event
+        self.stopped = True
 
-        # Additionally, try to stop the browser agents directly
-        # Need to run this async in the background or manage event loops carefully
-        async def do_stop_browsers():
-            await self._stop_lingering_browsers(self.current_task_id)
-
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(do_stop_browsers())
-        except RuntimeError:  # No running loop in current thread
-            asyncio.run(do_stop_browsers())
+    def close(self):
+        self.stopped = False
