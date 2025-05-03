@@ -104,7 +104,10 @@ class WebuiManager:
         for comp_id, comp_val in ui_settings.items():
             if comp_id in self.id_to_component:
                 comp = self.id_to_component[comp_id]
-                update_components[comp] = comp.__class__(value=comp_val)
+                if comp.__class__.__name__ == "Chatbot":
+                    update_components[comp] = comp.__class__(value=comp_val, type="messages")
+                else:
+                    update_components[comp] = comp.__class__(value=comp_val)
 
         config_status = self.id_to_component["load_save_config.config_status"]
         update_components.update(
