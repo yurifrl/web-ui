@@ -989,7 +989,6 @@ def create_browser_use_agent_tab(webui_manager: WebuiManager):
             type="messages",
             height=600,
             show_copy_button=True,
-            bubble_full_width=False,
         )
         user_input = gr.Textbox(
             label="Your Task or Response",
