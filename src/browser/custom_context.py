@@ -42,7 +42,10 @@ class CustomBrowserContext(BrowserContext):
                 bypass_csp=self.config.disable_security,
                 ignore_https_errors=self.config.disable_security,
                 record_video_dir=self.config.save_recording_path,
-                record_video_size=self.config.browser_window_size.model_dump(),
+                record_video_size={
+                    "width": self.config.window_width,
+                    "height": self.config.window_height
+                },
                 record_har_path=self.config.save_har_path,
                 locale=self.config.locale,
                 http_credentials=self.config.http_credentials,
