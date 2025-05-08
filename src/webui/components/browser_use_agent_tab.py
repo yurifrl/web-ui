@@ -13,7 +13,7 @@ from browser_use.agent.views import (
     AgentOutput,
 )
 from browser_use.browser.browser import BrowserConfig
-from browser_use.browser.context import BrowserContext, BrowserContextWindowSize
+from browser_use.browser.context import BrowserContext
 from browser_use.browser.views import BrowserState
 from gradio.components import Component
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -485,9 +485,8 @@ async def run_agent_task(
                 if save_recording_path
                 else None,
                 save_downloads_path=save_download_path if save_download_path else None,
-                browser_window_size=BrowserContextWindowSize(
-                    width=window_w, height=window_h
-                ),
+               window_width=window_w,
+               window_height=window_h,
             )
             if not webui_manager.bu_browser:
                 raise ValueError("Browser not initialized, cannot create context.")

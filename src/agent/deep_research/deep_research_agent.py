@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 from browser_use.browser.browser import BrowserConfig
-from browser_use.browser.context import BrowserContextWindowSize
 from langchain_community.tools.file_management import (
     ListDirectoryTool,
     ReadFileTool,
@@ -107,9 +106,8 @@ async def run_single_browser_task(
 
         context_config = CustomBrowserContextConfig(
             save_downloads_path="./tmp/downloads",
-            browser_window_size=BrowserContextWindowSize(
-                width=window_w, height=window_h
-            ),
+            window_width=window_w,
+            window_height=window_h,
             force_new_context=True,
         )
         bu_browser_context = await bu_browser.new_context(config=context_config)
