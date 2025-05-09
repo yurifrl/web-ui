@@ -88,20 +88,8 @@ cp .env.example .env
     ```bash
     python webui.py --ip 127.0.0.1 --port 7788
     ```
-2. WebUI options:
-   - `--ip`: The IP address to bind the WebUI to. Default is `127.0.0.1`.
-   - `--port`: The port to bind the WebUI to. Default is `7788`.
-   - `--theme`: The theme for the user interface. Default is `Ocean`.
-     - **Default**: The standard theme with a balanced design.
-     - **Soft**: A gentle, muted color scheme for a relaxed viewing experience.
-     - **Monochrome**: A grayscale theme with minimal color for simplicity and focus.
-     - **Glass**: A sleek, semi-transparent design for a modern appearance.
-     - **Origin**: A classic, retro-inspired theme for a nostalgic feel.
-     - **Citrus**: A vibrant, citrus-inspired palette with bright and fresh colors.
-     - **Ocean** (default): A blue, ocean-inspired theme providing a calming effect.
-   - `--dark-mode`: Enables dark mode for the user interface.
-3.  **Access the WebUI:** Open your web browser and navigate to `http://127.0.0.1:7788`.
-4.  **Using Your Own Browser(Optional):**
+2. **Access the WebUI:** Open your web browser and navigate to `http://127.0.0.1:7788`.
+3. **Using Your Own Browser(Optional):**
     - Set `CHROME_PATH` to the executable path of your browser and `CHROME_USER_DATA` to the user data directory of your browser. Leave `CHROME_USER_DATA` empty if you want to use local user data.
       - Windows
         ```env
@@ -159,20 +147,6 @@ CHROME_PERSISTENT_SESSION=true docker compose up --build
   - Default VNC password: "youvncpassword"
   - Can be changed by setting `VNC_PASSWORD` in your `.env` file
 
-5. **Container Management:**
-   ```bash
-   # Start with persistent browser
-   CHROME_PERSISTENT_SESSION=true docker compose up -d
-
-   # Start with default mode (browser closes after tasks)
-   docker compose up -d
-
-   # View logs
-   docker compose logs -f
-
-   # Stop the container
-   docker compose down
-   ```
 
 ## Changelog
 - [x] **2025/01/26:** Thanks to @vvincent1234. Now browser-use-webui can combine with DeepSeek-r1 to engage in deep thinking!
