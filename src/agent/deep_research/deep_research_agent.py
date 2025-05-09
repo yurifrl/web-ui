@@ -97,7 +97,7 @@ async def run_single_browser_task(
         bu_browser = CustomBrowser(
             config=BrowserConfig(
                 headless=headless,
-                disable_security=disable_security,
+                disable_security=False,
                 browser_binary_path=browser_binary_path,
                 extra_browser_args=extra_args,
                 wss_url=wss_url,
@@ -553,7 +553,7 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
     else:
         current_task_message = [
             SystemMessage(
-                content="You are a research assistant executing one step of a research plan. Use the available tools, especially the 'parallel_browser_search' tool, to gather information needed for the current task. Be precise with your search queries if using the browser tool. Please output at least one tool."
+                content="You are a research assistant executing one step of a research plan. Use the available tools, especially the 'parallel_browser_search' tool, to gather information needed for the current task. Be precise with your search queries if using the browser tool."
             ),
             HumanMessage(
                 content=f"Research Task (Step {current_step['step']}): {current_step['task']}"
