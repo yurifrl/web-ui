@@ -29,9 +29,10 @@ from langchain_core.tools import StructuredTool, Tool
 from langgraph.graph import StateGraph
 from pydantic import BaseModel, Field
 
+from browser_use.browser.context import BrowserContextWindowSize, BrowserContextConfig
+
 from src.agent.browser_use.browser_use_agent import BrowserUseAgent
 from src.browser.custom_browser import CustomBrowser
-from src.browser.custom_context import CustomBrowserContextConfig
 from src.controller.custom_controller import CustomController
 from src.utils.mcp_client import setup_mcp_client_and_tools
 
@@ -47,12 +48,12 @@ _BROWSER_AGENT_INSTANCES = {}
 
 
 async def run_single_browser_task(
-    task_query: str,
-    task_id: str,
-    llm: Any,  # Pass the main LLM
-    browser_config: Dict[str, Any],
-    stop_event: threading.Event,
-    use_vision: bool = False,
+        task_query: str,
+        task_id: str,
+        llm: Any,  # Pass the main LLM
+        browser_config: Dict[str, Any],
+        stop_event: threading.Event,
+        use_vision: bool = False,
 ) -> Dict[str, Any]:
     """
     Runs a single BrowserUseAgent task.
@@ -104,10 +105,9 @@ async def run_single_browser_task(
             )
         )
 
-        context_config = CustomBrowserContextConfig(
+        context_config = BrowserContextConfig(
             save_downloads_path="./tmp/downloads",
-            window_width=window_w,
-            window_height=window_h,
+            browser_window_size=BrowserContextWindowSize(width=window_w, height=window_h),
             force_new_context=True,
         )
         bu_browser_context = await bu_browser.new_context(config=context_config)
@@ -198,12 +198,12 @@ class BrowserSearchInput(BaseModel):
 
 
 async def _run_browser_search_tool(
-    queries: List[str],
-    task_id: str,  # Injected dependency
-    llm: Any,  # Injected dependency
-    browser_config: Dict[str, Any],
-    stop_event: threading.Event,
-    max_parallel_browsers: int = 1,
+        queries: List[str],
+        task_id: str,  # Injected dependency
+        llm: Any,  # Injected dependency
+        browser_config: Dict[str, Any],
+        stop_event: threading.Event,
+        max_parallel_browsers: int = 1,
 ) -> List[Dict[str, Any]]:
     """
     Internal function to execute parallel browser searches based on LLM-provided queries.
@@ -267,11 +267,11 @@ async def _run_browser_search_tool(
 
 
 def create_browser_search_tool(
-    llm: Any,
-    browser_config: Dict[str, Any],
-    task_id: str,
-    stop_event: threading.Event,
-    max_parallel_browsers: int = 1,
+        llm: Any,
+        browser_config: Dict[str, Any],
+        task_id: str,
+        stop_event: threading.Event,
+        max_parallel_browsers: int = 1,
 ) -> StructuredTool:
     """Factory function to create the browser search tool with necessary dependencies."""
     # Use partial to bind the dependencies that aren't part of the LLM call arguments
@@ -553,7 +553,7 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
     else:
         current_task_message = [
             SystemMessage(
-                content="You are a research assistant executing one step of a research plan. Use the available tools, especially the 'parallel_browser_search' tool, to gather information needed for the current task. Be precise with your search queries if using the browser tool."
+                content="You are a research assistant executing one step of a research plan. Use the available tools, especially the 'parallel_browser_search' tool, to gather information needed for the current task. Be precise with your search queries if using the browser tool. Please output at least one tool."
             ),
             HumanMessage(
                 content=f"Research Task (Step {current_step['step']}): {current_step['task']}"
@@ -582,8 +582,11 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
             _save_plan_to_md(plan, output_dir)
             return {
                 "research_plan": plan,
-                "current_step_index": current_index + 1,
-                "error_message": f"LLM failed to call a tool for step {current_step['step']}.",
+                "status": "pending",
+                "current_step_index": current_index,
+                "messages": [
+                    f"LLM failed to call a tool for step {current_step['step']}. Response: {ai_response.content}"
+                    f". Please use tool to do research unless you are thinking or summary"],
             }
 
         # Process tool calls
@@ -665,8 +668,8 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
         browser_tool_called = "parallel_browser_search" in executed_tool_names
         # We might need a more nuanced status based on the *content* of tool_results
         step_failed = (
-            any("Error:" in str(tr.content) for tr in tool_results)
-            or not browser_tool_called
+                any("Error:" in str(tr.content) for tr in tool_results)
+                or not browser_tool_called
         )
 
         if step_failed:
@@ -695,9 +698,9 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
             "search_results": current_search_results,  # Update with new results
             "current_step_index": current_index + 1,
             "messages": state["messages"]
-            + current_task_message
-            + [ai_response]
-            + tool_results,
+                        + current_task_message
+                        + [ai_response]
+                        + tool_results,
             # Optionally return the tool_results messages if needed by downstream nodes
         }
 
@@ -879,10 +882,10 @@ def should_continue(state: DeepResearchState) -> str:
 
 class DeepResearchAgent:
     def __init__(
-        self,
-        llm: Any,
-        browser_config: Dict[str, Any],
-        mcp_server_config: Optional[Dict[str, Any]] = None,
+            self,
+            llm: Any,
+            browser_config: Dict[str, Any],
+            mcp_server_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initializes the DeepSearchAgent.
@@ -904,7 +907,7 @@ class DeepResearchAgent:
         self.runner: Optional[asyncio.Task] = None  # To hold the asyncio task for run
 
     async def _setup_tools(
-        self, task_id: str, stop_event: threading.Event, max_parallel_browsers: int = 1
+            self, task_id: str, stop_event: threading.Event, max_parallel_browsers: int = 1
     ) -> List[Tool]:
         """Sets up the basic tools (File I/O) and optional MCP tools."""
         tools = [
@@ -981,11 +984,11 @@ class DeepResearchAgent:
         return app
 
     async def run(
-        self,
-        topic: str,
-        task_id: Optional[str] = None,
-        save_dir: str = "./tmp/deep_research",
-        max_parallel_browsers: int = 1,
+            self,
+            topic: str,
+            task_id: Optional[str] = None,
+            save_dir: str = "./tmp/deep_research",
+            max_parallel_browsers: int = 1,
     ) -> Dict[str, Any]:
         """
         Starts the deep research process (Async Generator Version).

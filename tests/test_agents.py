@@ -26,9 +26,9 @@ async def test_browser_use_agent():
     from browser_use.agent.service import Agent
 
     from src.browser.custom_browser import CustomBrowser
-    from src.browser.custom_context import CustomBrowserContextConfig
     from src.controller.custom_controller import CustomController
     from src.utils import llm_provider
+    from src.agent.browser_use.browser_use_agent import BrowserUseAgent
 
     # llm = utils.get_llm_model(
     #     provider="openai",
@@ -77,15 +77,15 @@ async def test_browser_use_agent():
 
     mcp_server_config = {
         "mcpServers": {
-            "markitdown": {
-                "command": "docker",
-                "args": [
-                    "run",
-                    "--rm",
-                    "-i",
-                    "markitdown-mcp:latest"
-                ]
-            },
+            # "markitdown": {
+            #     "command": "docker",
+            #     "args": [
+            #         "run",
+            #         "--rm",
+            #         "-i",
+            #         "markitdown-mcp:latest"
+            #     ]
+            # },
             "desktop-commander": {
                 "command": "npx",
                 "args": [
@@ -97,8 +97,8 @@ async def test_browser_use_agent():
     }
     controller = CustomController()
     await controller.setup_mcp_client(mcp_server_config)
-    use_own_browser = False
-    disable_security = True
+    use_own_browser = True
+    disable_security = False
     use_vision = True  # Set to False when using DeepSeek
 
     max_actions_per_step = 10
@@ -125,7 +125,7 @@ async def test_browser_use_agent():
             )
         )
         browser_context = await browser.new_context(
-            config=CustomBrowserContextConfig(
+            config=BrowserContextConfig(
                 trace_path="./tmp/traces",
                 save_recording_path="./tmp/record_videos",
                 save_downloads_path="./tmp/downloads",
@@ -135,8 +135,9 @@ async def test_browser_use_agent():
                 force_new_context=True
             )
         )
-        agent = Agent(
-            task="download pdf from https://arxiv.org/abs/2504.10458 and rename this pdf to 'GUI-r1-test.pdf'",
+        agent = BrowserUseAgent(
+            # task="download pdf from https://arxiv.org/pdf/2311.16498 and rename this pdf to 'mcp-test.pdf'",
+            task="give me nvidia stock price",
             llm=llm,
             browser=browser,
             browser_context=browser_context,
@@ -152,7 +153,6 @@ async def test_browser_use_agent():
 
         print("\nErrors:")
         pprint(history.errors(), indent=4)
-
 
     except Exception:
         import traceback
@@ -182,9 +182,9 @@ async def test_browser_use_parallel():
     from browser_use.agent.service import Agent
 
     from src.browser.custom_browser import CustomBrowser
-    from src.browser.custom_context import CustomBrowserContextConfig
     from src.controller.custom_controller import CustomController
     from src.utils import llm_provider
+    from src.agent.browser_use.browser_use_agent import BrowserUseAgent
 
     # llm = utils.get_llm_model(
     #     provider="openai",
@@ -233,15 +233,15 @@ async def test_browser_use_parallel():
 
     mcp_server_config = {
         "mcpServers": {
-            "markitdown": {
-                "command": "docker",
-                "args": [
-                    "run",
-                    "--rm",
-                    "-i",
-                    "markitdown-mcp:latest"
-                ]
-            },
+            # "markitdown": {
+            #     "command": "docker",
+            #     "args": [
+            #         "run",
+            #         "--rm",
+            #         "-i",
+            #         "markitdown-mcp:latest"
+            #     ]
+            # },
             "desktop-commander": {
                 "command": "npx",
                 "args": [
@@ -262,7 +262,7 @@ async def test_browser_use_parallel():
     controller = CustomController()
     await controller.setup_mcp_client(mcp_server_config)
     use_own_browser = False
-    disable_security = True
+    disable_security = False
     use_vision = True  # Set to False when using DeepSeek
 
     max_actions_per_step = 10
@@ -289,7 +289,7 @@ async def test_browser_use_parallel():
             )
         )
         browser_context = await browser.new_context(
-            config=CustomBrowserContextConfig(
+            config=BrowserContextConfig(
                 trace_path="./tmp/traces",
                 save_recording_path="./tmp/record_videos",
                 save_downloads_path="./tmp/downloads",
@@ -300,7 +300,7 @@ async def test_browser_use_parallel():
             )
         )
         agents = [
-            Agent(task=task, llm=llm, browser=browser, controller=controller)
+            BrowserUseAgent(task=task, llm=llm, browser=browser, controller=controller)
             for task in [
                 'Search Google for weather in Tokyo',
                 # 'Check Reddit front page title',
@@ -332,6 +332,8 @@ async def test_browser_use_parallel():
             await browser_context.close()
         if browser:
             await browser.close()
+        if controller:
+            await controller.close_mcp_client()
 
 
 async def test_deep_research_agent():
@@ -362,8 +364,8 @@ async def test_deep_research_agent():
 
     browser_config = {"headless": False, "window_width": 1280, "window_height": 1100, "use_own_browser": False}
     agent = DeepResearchAgent(llm=llm, browser_config=browser_config, mcp_server_config=mcp_server_config)
-    research_topic = "Impact of Microplastics on Marine Ecosystems"
-    task_id_to_resume = "815460fb-337a-4850-8fa4-a5f2db301a89"  # Set this to resume a previous task ID
+    research_topic = "Give me a detailed travel plan to Switzerland from June 1st to 10th."
+    task_id_to_resume = ""  # Set this to resume a previous task ID
 
     print(f"Starting research on: {research_topic}")
 
