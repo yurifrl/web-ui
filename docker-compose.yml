@@ -1,4 +1,5 @@
 services:
+  # debug: docker compose run --rm -it browser-use-webui bash
   browser-use-webui:
     build:
       context: .
@@ -11,7 +12,7 @@ services:
       - "5901:5901"
       - "9222:9222"
     environment:
-      # LLM API Keys & Endpoints (Your existing list)
+      # LLM API Keys & Endpoints
       - OPENAI_ENDPOINT=${OPENAI_ENDPOINT:-https://api.openai.com/v1}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_ENDPOINT=${ANTHROPIC_ENDPOINT:-https://api.anthropic.com}
@@ -42,7 +43,8 @@ services:
       - BROWSER_USE_LOGGING_LEVEL=${BROWSER_USE_LOGGING_LEVEL:-info}
 
       # Browser Settings
-      - BROWSER_USER_DATA=${BROWSER_USER_DATA:-/app/data/chrome_data}
+      - BROWSER_PATH=/usr/bin/google-chrome
+      - BROWSER_USER_DATA=/app/data/chrome_data
       - BROWSER_DEBUGGING_PORT=${BROWSER_DEBUGGING_PORT:-9222}
       - BROWSER_DEBUGGING_HOST=${BROWSER_DEBUGGING_HOST:-0.0.0.0}
       - KEEP_BROWSER_OPEN=${KEEP_BROWSER_OPEN:-true}

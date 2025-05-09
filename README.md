@@ -63,11 +63,11 @@ uv pip install -r requirements.txt
 
 Install Browsers in Patchright. 
 ```bash
-patchright install
+patchright install --with-deps
 ```
 Or you can install specific browsers by running:
 ```bash
-patchright install chromium --with-deps --no-shell
+patchright install chromium --with-deps
 ```
 
 #### Step 4: Configure Environment
@@ -82,25 +82,24 @@ cp .env.example .env
 ```
 2. Open `.env` in your preferred text editor and add your API keys and other settings
 
-#### Local Setup
+#### Step 5: Enjoy the web-ui
 1.  **Run the WebUI:**
-    After completing the installation steps above, start the application:
     ```bash
     python webui.py --ip 127.0.0.1 --port 7788
     ```
 2. **Access the WebUI:** Open your web browser and navigate to `http://127.0.0.1:7788`.
 3. **Using Your Own Browser(Optional):**
-    - Set `CHROME_PATH` to the executable path of your browser and `CHROME_USER_DATA` to the user data directory of your browser. Leave `CHROME_USER_DATA` empty if you want to use local user data.
+    - Set `BROWSER_PATH` to the executable path of your browser and `BROWSER_USER_DATA` to the user data directory of your browser. Leave `BROWSER_USER_DATA` empty if you want to use local user data.
       - Windows
         ```env
-         CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
-         CHROME_USER_DATA="C:\Users\YourUsername\AppData\Local\Google\Chrome\User Data"
+         BROWSER_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
+         BROWSER_USER_DATA="C:\Users\YourUsername\AppData\Local\Google\Chrome\User Data"
         ```
         > Note: Replace `YourUsername` with your actual Windows username for Windows systems.
       - Mac
         ```env
-         CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-         CHROME_USER_DATA="/Users/YourUsername/Library/Application Support/Google/Chrome"
+         BROWSER_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+         BROWSER_USER_DATA="/Users/YourUsername/Library/Application Support/Google/Chrome"
         ```
     - Close all Chrome windows
     - Open the WebUI in a non-Chrome browser, such as Firefox or Edge. This is important because the persistent browser context will use the Chrome data when running the agent.
@@ -113,14 +112,14 @@ cp .env.example .env
   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (For Windows/macOS)
   - [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/) (For Linux)
 
-#### Installation Steps
-1. Clone the repository:
+#### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/browser-use/web-ui.git
 cd web-ui
 ```
 
-2. Create and configure environment file:
+#### Step 2: Configure Environment
+1. Create a copy of the example environment file:
 - Windows (Command Prompt):
 ```bash
 copy .env.example .env
@@ -129,24 +128,22 @@ copy .env.example .env
 ```bash
 cp .env.example .env
 ```
-Edit `.env` with your preferred text editor and add your API keys
+2. Open `.env` in your preferred text editor and add your API keys and other settings
 
-3. Run with Docker:
+#### Step 3: Docker Build and Run
 ```bash
-# Build and start the container with default settings (browser closes after AI tasks)
 docker compose up --build
 ```
+For ARM64 systems (e.g., Apple Silicon Macs), please run follow command:
 ```bash
-# Or run with persistent browser (browser stays open between AI tasks)
-CHROME_PERSISTENT_SESSION=true docker compose up --build
+TARGETPLATFORM=linux/arm64 docker compose up --build
 ```
 
-4. Access the Application:
-- Web Interface: Open `http://localhost:7788` in your browser
+#### Step 4: Enjoy the web-ui and vnc
+- Web-UI: Open `http://localhost:7788` in your browser
 - VNC Viewer (for watching browser interactions): Open `http://localhost:6080/vnc.html`
   - Default VNC password: "youvncpassword"
   - Can be changed by setting `VNC_PASSWORD` in your `.env` file
-
 
 ## Changelog
 - [x] **2025/01/26:** Thanks to @vvincent1234. Now browser-use-webui can combine with DeepSeek-r1 to engage in deep thinking!
