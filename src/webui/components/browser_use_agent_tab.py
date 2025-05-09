@@ -13,7 +13,7 @@ from browser_use.agent.views import (
     AgentOutput,
 )
 from browser_use.browser.browser import BrowserConfig
-from browser_use.browser.context import BrowserContext, BrowserContextWindowSize, BrowserContextConfig
+from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from browser_use.browser.views import BrowserState
 from gradio.components import Component
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -451,20 +451,16 @@ async def run_agent_task(
         if not webui_manager.bu_browser:
             logger.info("Launching new browser instance.")
             extra_args = [f"--window-size={window_w},{window_h}"]
-            if browser_user_data_dir:
-                extra_args.append(f"--user-data-dir={browser_user_data_dir}")
-
             if use_own_browser:
-                browser_binary_path = (
-                        os.getenv("CHROME_PATH", None) or browser_binary_path
-                )
+                browser_binary_path = os.getenv("BROWSER_PATH", None) or browser_binary_path
                 if browser_binary_path == "":
                     browser_binary_path = None
-                chrome_user_data = os.getenv("CHROME_USER_DATA", None)
-                if chrome_user_data:
-                    extra_args += [f"--user-data-dir={chrome_user_data}"]
+                browser_user_data = browser_user_data_dir or os.getenv("BROWSER_USER_DATA", None)
+                if browser_user_data:
+                    extra_args += [f"--user-data-dir={browser_user_data}"]
             else:
                 browser_binary_path = None
+
             webui_manager.bu_browser = CustomBrowser(
                 config=BrowserConfig(
                     headless=headless,
@@ -485,7 +481,8 @@ async def run_agent_task(
                 if save_recording_path
                 else None,
                 save_downloads_path=save_download_path if save_download_path else None,
-                browser_window_size=BrowserContextWindowSize(width=window_w, height=window_h),
+                window_height=window_h,
+                window_width=window_w,
             )
             if not webui_manager.bu_browser:
                 raise ValueError("Browser not initialized, cannot create context.")

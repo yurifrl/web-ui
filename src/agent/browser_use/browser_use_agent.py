@@ -20,6 +20,7 @@ from browser_use.telemetry.views import (
 )
 from browser_use.utils import time_execution_async
 from dotenv import load_dotenv
+from browser_use.agent.message_manager.utils import is_model_without_tool_support
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -30,6 +31,22 @@ SKIP_LLM_API_KEY_VERIFICATION = (
 
 
 class BrowserUseAgent(Agent):
+    def _set_tool_calling_method(self) -> ToolCallingMethod | None:
+        tool_calling_method = self.settings.tool_calling_method
+        if tool_calling_method == 'auto':
+            if is_model_without_tool_support(self.model_name):
+                return 'raw'
+            elif self.chat_model_library == 'ChatGoogleGenerativeAI':
+                return None
+            elif self.chat_model_library == 'ChatOpenAI':
+                return 'function_calling'
+            elif self.chat_model_library == 'AzureChatOpenAI':
+                return 'function_calling'
+            else:
+                return None
+        else:
+            return tool_calling_method
+
     @time_execution_async("--run (agent)")
     async def run(
             self, max_steps: int = 100, on_step_start: AgentHookFunc | None = None,
