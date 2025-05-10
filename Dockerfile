@@ -81,7 +81,7 @@ RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH
 # Install recommended: Google Chrome (instead of just Chromium for better undetectability)
 # The 'patchright install chrome' command might download and place it.
 # The '--with-deps' equivalent for patchright install is to run 'patchright install-deps chrome' after.
-RUN patchright install chrome --with-deps
+# RUN patchright install chrome --with-deps
 
 # Alternative: Install Chromium if Google Chrome is problematic in certain environments
 RUN patchright install chromium --with-deps
