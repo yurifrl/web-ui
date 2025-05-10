@@ -46,8 +46,9 @@ services:
       - BROWSER_PATH=/usr/bin/google-chrome
       - BROWSER_USER_DATA=/app/data/chrome_data
       - BROWSER_DEBUGGING_PORT=${BROWSER_DEBUGGING_PORT:-9222}
-      - BROWSER_DEBUGGING_HOST=${BROWSER_DEBUGGING_HOST:-0.0.0.0}
-      - KEEP_BROWSER_OPEN=${KEEP_BROWSER_OPEN:-true}
+      - BROWSER_DEBUGGING_HOST=0.0.0.0
+      - USE_OWN_BROWSER=true
+      - KEEP_BROWSER_OPEN=true
       - BROWSER_CDP=${BROWSER_CDP:-} # e.g., http://localhost:9222
 
       # Display Settings
