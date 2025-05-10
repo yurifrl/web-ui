@@ -26,25 +26,33 @@ from browser_use.browser.utils.screen_resolution import get_screen_resolution, g
 from browser_use.utils import time_execution_async
 import socket
 
-from .custom_context import CustomBrowserContext, CustomBrowserContextConfig
+from .custom_context import CustomBrowserContext
 
 logger = logging.getLogger(__name__)
 
 
 class CustomBrowser(Browser):
 
-    async def new_context(self, config: CustomBrowserContextConfig | None = None) -> CustomBrowserContext:
+    async def new_context(self, config: BrowserContextConfig | None = None) -> CustomBrowserContext:
         """Create a browser context"""
         browser_config = self.config.model_dump() if self.config else {}
         context_config = config.model_dump() if config else {}
         merged_config = {**browser_config, **context_config}
-        return CustomBrowserContext(config=CustomBrowserContextConfig(**merged_config), browser=self)
+        return CustomBrowserContext(config=BrowserContextConfig(**merged_config), browser=self)
 
     async def _setup_builtin_browser(self, playwright: Playwright) -> PlaywrightBrowser:
         """Sets up and returns a Playwright Browser instance with anti-detection measures."""
         assert self.config.browser_binary_path is None, 'browser_binary_path should be None if trying to use the builtin browsers'
 
-        if self.config.headless:
+        # Use the configured window size from new_context_config if available
+        if (
+                not self.config.headless
+                and hasattr(self.config, 'new_context_config')
+                and hasattr(self.config.new_context_config, 'browser_window_size')
+        ):
+            screen_size = self.config.new_context_config.browser_window_size.model_dump()
+            offset_x, offset_y = get_window_adjustments()
+        elif self.config.headless:
             screen_size = {'width': 1920, 'height': 1080}
             offset_x, offset_y = 0, 0
         else:
@@ -52,6 +60,7 @@ class CustomBrowser(Browser):
             offset_x, offset_y = get_window_adjustments()
 
         chrome_args = {
+            f'--remote-debugging-port={self.config.chrome_remote_debugging_port}',
             *CHROME_ARGS,
             *(CHROME_DOCKER_ARGS if IN_DOCKER else []),
             *(CHROME_HEADLESS_ARGS if self.config.headless else []),
@@ -70,8 +79,8 @@ class CustomBrowser(Browser):
 
         # check if port 9222 is already taken, if so remove the remote-debugging-port arg to prevent conflicts
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(('localhost', 9222)) == 0:
-                chrome_args.remove('--remote-debugging-port=9222')
+            if s.connect_ex(('localhost', self.config.chrome_remote_debugging_port)) == 0:
+                chrome_args.remove(f'--remote-debugging-port={self.config.chrome_remote_debugging_port}')
 
         browser_class = getattr(playwright, self.config.browser_class)
         args = {

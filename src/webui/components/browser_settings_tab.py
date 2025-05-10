@@ -1,3 +1,5 @@
+import os
+
 import gradio as gr
 import logging
 from gradio.components import Component
@@ -56,7 +58,7 @@ def create_browser_settings_tab(webui_manager: WebuiManager):
             )
             keep_browser_open = gr.Checkbox(
                 label="Keep Browser Open",
-                value=True,
+                value=os.getenv("KEEP_BROWSER_OPEN", True),
                 info="Keep Browser Open between Tasks",
                 interactive=True
             )
@@ -91,6 +93,7 @@ def create_browser_settings_tab(webui_manager: WebuiManager):
         with gr.Row():
             cdp_url = gr.Textbox(
                 label="CDP URL",
+                value=os.getenv("BROWSER_CDP", None),
                 info="CDP URL for browser remote debugging",
                 interactive=True,
             )

@@ -116,7 +116,7 @@ async def run_deep_research(webui_manager: WebuiManager, components: Dict[Compon
         # LLM Config (from agent_settings tab)
         llm_provider_name = get_setting("agent_settings", "llm_provider")
         llm_model_name = get_setting("agent_settings", "llm_model_name")
-        llm_temperature = get_setting("agent_settings", "llm_temperature", 0.5)  # Default if not found
+        llm_temperature = max(get_setting("agent_settings", "llm_temperature", 0.5), 0.5)
         llm_base_url = get_setting("agent_settings", "llm_base_url")
         llm_api_key = get_setting("agent_settings", "llm_api_key")
         ollama_num_ctx = get_setting("agent_settings", "ollama_num_ctx")
@@ -132,7 +132,7 @@ async def run_deep_research(webui_manager: WebuiManager, components: Dict[Compon
         # Note: DeepResearchAgent constructor takes a dict, not full Browser/Context objects
         browser_config_dict = {
             "headless": get_setting("browser_settings", "headless", False),
-            "disable_security": get_setting("browser_settings", "disable_security", True),
+            "disable_security": get_setting("browser_settings", "disable_security", False),
             "browser_binary_path": get_setting("browser_settings", "browser_binary_path"),
             "user_data_dir": get_setting("browser_settings", "browser_user_data_dir"),
             "window_width": int(get_setting("browser_settings", "window_w", 1280)),

@@ -172,6 +172,10 @@ class CustomController(Controller):
                         param_model=create_tool_param_model(tool),
                     )
                     logger.info(f"Add mcp tool: {tool_name}")
+                logger.debug(
+                    f"Registered {len(self.mcp_client.server_name_to_tools[server_name])} mcp tools for {server_name}")
+        else:
+            logger.warning(f"MCP client not started.")
 
     async def close_mcp_client(self):
         if self.mcp_client:
