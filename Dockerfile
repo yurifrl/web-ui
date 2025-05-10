@@ -86,6 +86,7 @@ RUN mkdir -p $PLAYWRIGHT_BROWSERS_PATH
 # Alternative: Install Chromium if Google Chrome is problematic in certain environments
 RUN patchright install chromium --with-deps
 
+
 # Copy the application code
 COPY . .
 
