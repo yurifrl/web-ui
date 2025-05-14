@@ -79,5 +79,12 @@ model_names = {
         "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
         "deepseek-ai/DeepSeek-R1",
         "deepseek-ai/DeepSeek-V3",
+        "Qwen/Qwen3-1.7B",
+        "Qwen/Qwen3-4B",
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-14B",
+        "Qwen/Qwen3-30B-A3B",
+        "Qwen/Qwen3-32B",
+        "Qwen/Qwen3-235B-A22B",
     ],
 }
