@@ -81,7 +81,7 @@ async def run_single_browser_task(
     bu_browser_context = None
     try:
         logger.info(f"Starting browser task for query: {task_query}")
-        extra_args = [f"--window-size={window_w},{window_h}"]
+        extra_args = []
         if use_own_browser:
             browser_binary_path = os.getenv("BROWSER_PATH", None) or browser_binary_path
             if browser_binary_path == "":
@@ -99,6 +99,10 @@ async def run_single_browser_task(
                 extra_browser_args=extra_args,
                 wss_url=wss_url,
                 cdp_url=cdp_url,
+                new_context_config=BrowserContextConfig(
+                    window_width=window_w,
+                    window_height=window_h,
+                )
             )
         )
 
