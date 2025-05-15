@@ -207,7 +207,7 @@ def create_agent_settings_tab(webui_manager: WebuiManager):
             value="auto",
             interactive=True,
             allow_custom_value=True,
-            choices=["auto", "json_schema", "function_calling", "None"],
+            choices=['function_calling', 'json_mode', 'raw', 'auto', 'tools', "None"],
             visible=True
         )
     tab_components.update(dict(
