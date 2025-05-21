@@ -7,7 +7,8 @@ PROVIDER_DISPLAY_NAMES = {
     "alibaba": "Alibaba",
     "moonshot": "MoonShot",
     "unbound": "Unbound AI",
-    "ibm": "IBM"
+    "ibm": "IBM",
+    "grok": "Grok",
 }
 
 # Predefined model names for common providers
@@ -25,6 +26,15 @@ model_names = {
     "alibaba": ["qwen-plus", "qwen-max", "qwen-vl-max", "qwen-vl-plus", "qwen-turbo", "qwen-long"],
     "moonshot": ["moonshot-v1-32k-vision-preview", "moonshot-v1-8k-vision-preview"],
     "unbound": ["gemini-2.0-flash", "gpt-4o-mini", "gpt-4o", "gpt-4.5-preview"],
+    "grok": [
+        "grok-3",
+        "grok-3-fast",
+        "grok-3-mini",
+        "grok-3-mini-fast",
+        "grok-2-vision",
+        "grok-2-image",
+        "grok-2",
+    ],
     "siliconflow": [
         "deepseek-ai/DeepSeek-R1",
         "deepseek-ai/DeepSeek-V3",
