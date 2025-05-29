@@ -76,7 +76,7 @@ async def run_deep_research(webui_manager: WebuiManager, components: Dict[Compon
     max_parallel_agents = int(components.get(parallel_num_comp, 1))
     base_save_dir = components.get(save_dir_comp, "./tmp/deep_research").strip()
     safe_root_dir = "./tmp/deep_research"
-    normalized_base_save_dir = os.path.normpath(base_save_dir)
+    normalized_base_save_dir = os.path.abspath(os.path.normpath(base_save_dir))
     if os.path.commonpath([normalized_base_save_dir, os.path.abspath(safe_root_dir)]) != os.path.abspath(safe_root_dir):
         logger.warning(f"Unsafe base_save_dir detected: {base_save_dir}. Using default directory.")
         normalized_base_save_dir = os.path.abspath(safe_root_dir)
